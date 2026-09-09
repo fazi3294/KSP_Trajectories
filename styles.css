@@ -10,9 +10,15 @@ body {
 }
 
 .layout {
+  --panel-width: clamp(360px, 30vw, 520px);
   display: grid;
-  grid-template-columns: 340px 1fr;
+  grid-template-columns: var(--panel-width) minmax(0, 1fr);
   min-height: 100vh;
+  position: relative;
+}
+
+.layout.panel-collapsed {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .panel {
@@ -23,6 +29,29 @@ body {
   background: rgba(8, 15, 24, 0.96);
   border-right: 1px solid rgba(148, 163, 184, 0.22);
   overflow-y: auto;
+}
+
+.layout.panel-collapsed .panel {
+  display: none;
+}
+
+.panel-toggle {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  width: auto;
+  min-width: 2.2rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.55rem;
+  background: rgba(8, 15, 24, 0.94);
+  color: #eff6ff;
+  cursor: pointer;
+  z-index: 5;
+}
+
+.layout:not(.panel-collapsed) .panel-toggle {
+  left: calc(var(--panel-width) - 1.5rem);
 }
 
 .panel h1,
@@ -85,7 +114,7 @@ body {
 .time-group {
   display: grid;
   gap: 0.45rem;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
 }
 
 .time-group label {
@@ -100,7 +129,7 @@ body {
 }
 
 .speed-group {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
 }
 
 .playback {
@@ -209,6 +238,10 @@ body {
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .layout:not(.panel-collapsed) .panel-toggle {
+    left: 0.75rem;
   }
 
   .panel {

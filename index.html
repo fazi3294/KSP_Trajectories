@@ -15,21 +15,32 @@
     </script>
   </head>
   <body>
-    <div class="layout">
-      <aside class="panel">
+    <div class="layout" id="layout">
+      <button
+        id="panel-toggle"
+        class="panel-toggle"
+        type="button"
+        aria-controls="settings-panel"
+        aria-expanded="true"
+        aria-label="Ukryj panel ustawień"
+        title="Ukryj panel ustawień"
+      >
+        ◀
+      </button>
+      <aside class="panel" id="settings-panel">
         <h1>KSP Trajectories</h1>
         <div class="panel-section">
           <div class="section-header">
             <span>Bieżący czas</span>
             <button id="time-parts-toggle" type="button">Uprość do sekund</button>
           </div>
-          <label>
+          <label id="current-time-seconds-field">
             Czas [s]
             <input id="current-time" type="number" min="0" step="1" value="0" />
           </label>
           <label class="time-mode">
             <input id="time-ut-mode" type="checkbox" />
-            Tryb UT (czas 0 gry = Rok 1, Dzień 1)
+            Tryb UT (czas 0 gry = Rok 0, Dzień 0)
           </label>
           <div id="time-parts-fields" class="time-group">
             <label><span>Y:</span><input id="current-years" type="number" min="0" step="1" value="0" /></label>
@@ -47,6 +58,10 @@
           </div>
           <button id="time-play-toggle" type="button">Play</button>
           <p>Prędkość animacji (na 1 sekundę czasu rzeczywistego):</p>
+          <label id="rate-time-seconds-field">
+            Prędkość [s/s]
+            <input id="rate-time" type="number" min="0" step="1" value="1" />
+          </label>
           <div id="rate-parts-fields" class="time-group speed-group">
             <label><span>Y:</span><input id="rate-years" type="number" min="0" step="1" value="0" /></label>
             <label><span>D:</span><input id="rate-days" type="number" min="0" step="1" value="0" /></label>
