@@ -11,22 +11,41 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 340px 1fr;
   min-height: 100vh;
 }
 
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 1rem;
   padding: 1.25rem;
   background: rgba(8, 15, 24, 0.96);
   border-right: 1px solid rgba(148, 163, 184, 0.22);
+  overflow-y: auto;
 }
 
 .panel h1,
 .panel h2 {
   margin: 0;
+}
+
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 0.75rem;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-weight: 700;
 }
 
 .panel label {
@@ -56,14 +75,32 @@ body {
   cursor: pointer;
 }
 
-.time-grid {
-  display: grid;
-  gap: 0.5rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.panel button#time-parts-toggle,
+.panel button#rate-parts-toggle {
+  width: auto;
+  padding-inline: 0.8rem;
+  white-space: nowrap;
 }
 
-.speed-grid {
-  grid-template-columns: 1fr;
+.time-group {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.time-group label {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.time-group span {
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.speed-group {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .playback {
@@ -138,5 +175,9 @@ body {
   .viewport-wrap,
   #viewport {
     min-height: 70vh;
+  }
+
+  .time-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

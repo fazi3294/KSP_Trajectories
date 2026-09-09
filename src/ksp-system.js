@@ -207,9 +207,8 @@ export function getBodyPosition(bodyName, timeSeconds) {
     return { x: 0, y: 0, z: 0 };
   }
 
-  const angle =
-    degreesToRadians(body.phaseDeg ?? 0) +
-    ((timeSeconds % body.orbitalPeriod) / body.orbitalPeriod) * Math.PI * 2;
+  const orbitFraction = ((timeSeconds % body.orbitalPeriod) + body.orbitalPeriod) % body.orbitalPeriod / body.orbitalPeriod;
+  const angle = degreesToRadians(body.phaseDeg ?? 0) + orbitFraction * Math.PI * 2;
   const inclination = degreesToRadians(body.inclinationDeg ?? 0);
   const local = {
     x: Math.cos(angle) * body.semiMajorAxis,
