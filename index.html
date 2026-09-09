@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KSP Trajectories</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="panel">
+        <h1>KSP Trajectories</h1>
+        <label>
+          Bieżący czas gry [s]
+          <input id="current-time" type="number" min="0" step="1000" value="0" />
+        </label>
+
+        <div class="toggles">
+          <label><input id="show-orbits" type="checkbox" checked /> Pokaż orbity</label>
+          <label><input id="show-labels" type="checkbox" checked /> Pokaż nazwy</label>
+          <label><input id="show-soi" type="checkbox" /> Pokaż SOI</label>
+        </div>
+
+        <h2>Transfer</h2>
+        <label>
+          Start
+          <select id="origin"></select>
+        </label>
+        <label>
+          Cel
+          <select id="destination"></select>
+        </label>
+        <label>
+          Czas opuszczenia SOI [s]
+          <input id="departure-time" type="number" min="0" step="1000" value="0" />
+        </label>
+        <label>
+          Czas osiągnięcia SOI celu [s]
+          <input id="arrival-time" type="number" min="0" step="1000" value="5000000" />
+        </label>
+        <p id="transfer-summary"></p>
+        <p class="hint">
+          Podwójne kliknięcie na planetę lub księżyc ustawia fokus kamery.
+        </p>
+      </aside>
+
+      <main class="viewport-wrap">
+        <div id="viewport"></div>
+        <div id="labels"></div>
+      </main>
+    </div>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+  </html>

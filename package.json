@@ -1,0 +1,20 @@
+{
+  "name": "ksp_trajectories",
+  "version": "1.0.0",
+  "description": "Kerbal Space Program Stock Planets positions at a given time.",
+  "scripts": {
+    "start": "python3 -m http.server 4173",
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://localhost:26831/fazi3294/KSP_Trajectories"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "dependencies": {
+    "three": "^0.179.1"
+  }
+}
