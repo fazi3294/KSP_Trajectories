@@ -3,14 +3,9 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   BODIES,
   DISTANCE_SCALE,
-  getTransferPlan,
-  getTransferSearchContext,
   getBodyOrbitPoints,
-  findTransferWindows,
   getScaledPosition,
   getScaledSOI,
-  getTransferState,
-  listTransferBodies,
 } from "./ksp-system.js";
 
 const KERBIN_DAYS_PER_YEAR = 426;
@@ -40,20 +35,9 @@ const timeModeToggle = document.querySelector("#time-parts-toggle");
 const timePartsFields = document.querySelector("#time-parts-fields");
 const rateModeToggle = document.querySelector("#rate-parts-toggle");
 const ratePartsFields = document.querySelector("#rate-parts-fields");
-const departureTimeInput = document.querySelector("#departure-time");
-const arrivalTimeInput = document.querySelector("#arrival-time");
-const originSelect = document.querySelector("#origin");
-const destinationSelect = document.querySelector("#destination");
-const searchStartTimeInput = document.querySelector("#search-start-time");
-const searchEndTimeInput = document.querySelector("#search-end-time");
-const searchMinDurationInput = document.querySelector("#search-min-duration");
-const searchMaxDurationInput = document.querySelector("#search-max-duration");
-const searchTransferWindowsButton = document.querySelector("#search-transfer-windows");
-const transferWindowResults = document.querySelector("#transfer-window-results");
 const showOrbitsInput = document.querySelector("#show-orbits");
 const showLabelsInput = document.querySelector("#show-labels");
 const showSOIInput = document.querySelector("#show-soi");
-const transferSummary = document.querySelector("#transfer-summary");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x020617);
@@ -94,8 +78,7 @@ scene.add(stars);
 
 const orbitGroup = new THREE.Group();
 const soiGroup = new THREE.Group();
-const transferGroup = new THREE.Group();
-scene.add(orbitGroup, soiGroup, transferGroup);
+scene.add(orbitGroup, soiGroup);
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -109,7 +92,6 @@ let isUpdatingTimeInputs = false;
 let lastFrameTime = performance.now();
 let useCompactTimeControls = false;
 let useCompactRateControls = false;
-let currentTransferPlan = null;
 
 function createLabel(name) {
   const label = document.createElement("div");
@@ -161,31 +143,6 @@ for (const body of BODIES) {
   bodyStates.set(body.name, { body, mesh, soiMesh, orbit, label, isMoon });
   meshEntries.push({ body, mesh });
   labelEntries.push({ body, mesh, label, isMoon });
-}
-
-const transferCurve = new THREE.Line(
-  new THREE.BufferGeometry(),
-  new THREE.LineBasicMaterial({ color: 0xff8c42 }),
-);
-const shipMarker = new THREE.Mesh(
-  new THREE.SphereGeometry(0.6, 16, 16),
-  new THREE.MeshBasicMaterial({ color: 0xffffff }),
-);
-transferGroup.add(transferCurve, shipMarker);
-
-function populateSelectors() {
-  const names = listTransferBodies();
-  for (const select of [originSelect, destinationSelect]) {
-    for (const name of names) {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      select.appendChild(option);
-    }
-  }
-
-  originSelect.value = "Kerbin";
-  destinationSelect.value = "Duna";
 }
 
 function resizeRenderer() {
@@ -325,23 +282,6 @@ function getPlaybackRateSecondsPerSecond() {
   ) || DEFAULT_RATE_SECONDS;
 }
 
-function formatSecondsCompact(totalSeconds) {
-  const parts = secondsToTimeParts(totalSeconds, false);
-  return `${parts.years}Y ${parts.days}D ${parts.hours}H ${parts.minutes}m ${parts.seconds}s`;
-}
-
-function formatVelocity(value) {
-  return `${value.toFixed(0)} m/s`;
-}
-
-function formatAngle(value) {
-  return `${value.toFixed(1)}°`;
-}
-
-function toVector(position) {
-  return new THREE.Vector3(position.x, position.y, position.z);
-}
-
 function getWorldUnitsPerPixel(distance) {
   if (renderer.domElement.clientHeight <= 0) {
     return 0;
@@ -418,148 +358,6 @@ function updateBodies(timeSeconds) {
       orbit.visible = showMoon && showOrbitsInput.checked;
     }
   }
-}
-
-function buildTransferCurve(start, end) {
-  const startVector = toVector(start);
-  const endVector = toVector(end);
-  const centerBias = startVector.clone().add(endVector);
-  if (centerBias.lengthSq() === 0) {
-    centerBias.set(0, 12, 0);
-  } else {
-    centerBias.normalize().multiplyScalar(Math.max(startVector.length(), endVector.length(), 12) * 0.35);
-  }
-
-  const normal = new THREE.Vector3().crossVectors(startVector, endVector);
-  if (normal.lengthSq() === 0) {
-    normal.set(0, 1, 0);
-  } else {
-    normal.normalize().multiplyScalar(centerBias.length() * 0.35);
-  }
-
-  return new THREE.CubicBezierCurve3(
-    startVector,
-    startVector.clone().lerp(endVector, 0.3).add(centerBias).add(normal),
-    startVector.clone().lerp(endVector, 0.7).add(centerBias).sub(normal),
-    endVector,
-  );
-}
-
-function updateTransfer() {
-  const state = getTransferState(
-    originSelect.value,
-    destinationSelect.value,
-    Number(departureTimeInput.value),
-    Number(arrivalTimeInput.value),
-    getCurrentTime(),
-  );
-
-  if (!state.valid) {
-    transferCurve.visible = false;
-    shipMarker.visible = false;
-    transferSummary.textContent = state.reason;
-    return;
-  }
-
-  const curve = buildTransferCurve(state.start, state.end);
-  transferCurve.geometry.dispose();
-  transferCurve.geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(160));
-  transferCurve.visible = true;
-
-  shipMarker.position.copy(curve.getPoint(state.progress));
-  shipMarker.visible = state.shipVisible;
-
-  const summaryParts = [
-    `Trajektoria: ${originSelect.value} → ${destinationSelect.value}`,
-    `postęp lotu: ${Math.round(state.progress * 100)}%`,
-  ];
-  if (currentTransferPlan?.valid) {
-    summaryParts.push(`lot: ${formatSecondsCompact(currentTransferPlan.duration)}`);
-    summaryParts.push(`Δv: ${formatVelocity(currentTransferPlan.deltaV)}`);
-    summaryParts.push(`faza: ${formatAngle(currentTransferPlan.phaseAngleDeg)}`);
-  } else if (currentTransferPlan?.reason) {
-    summaryParts.push(currentTransferPlan.reason);
-  }
-
-  transferSummary.textContent = summaryParts.join(" | ");
-}
-
-function updateTransferPlanDetails() {
-  currentTransferPlan = getTransferPlan(
-    originSelect.value,
-    destinationSelect.value,
-    Number(departureTimeInput.value),
-    Number(arrivalTimeInput.value),
-  );
-}
-
-function selectTransferWindow(result) {
-  departureTimeInput.value = String(Math.floor(result.departureTime));
-  arrivalTimeInput.value = String(Math.floor(result.arrivalTime));
-  updateTransferPlanDetails();
-  updateTransfer();
-}
-
-function renderTransferWindowResults(results, emptyMessage = "Brak wyników dla wybranego zakresu.") {
-  if (!transferWindowResults) {
-    return;
-  }
-
-  transferWindowResults.replaceChildren();
-  if (results.length === 0) {
-    const empty = document.createElement("li");
-    empty.textContent = emptyMessage;
-    transferWindowResults.appendChild(empty);
-    return;
-  }
-
-  for (const result of results) {
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    const heading = document.createElement("span");
-    heading.className = "transfer-window-title";
-    heading.textContent = `Start: ${Math.floor(result.departureTime)} s → Przylot: ${Math.floor(result.arrivalTime)} s`;
-    const details = document.createElement("span");
-    details.className = "transfer-window-meta";
-    details.textContent = `Lot: ${formatSecondsCompact(result.duration)} | Δv: ${formatVelocity(
-      result.deltaV,
-    )} | Faza: ${formatAngle(result.phaseAngleDeg)}`;
-    button.append(heading, details);
-    button.addEventListener("click", () => {
-      selectTransferWindow(result);
-    });
-    item.appendChild(button);
-    transferWindowResults.appendChild(item);
-  }
-}
-
-function updateTransferSearchAvailability() {
-  const context = getTransferSearchContext(originSelect.value, destinationSelect.value);
-  if (searchTransferWindowsButton) {
-    searchTransferWindowsButton.title = context.valid ? "" : context.reason;
-  }
-}
-
-function searchTransferWindows() {
-  const context = getTransferSearchContext(originSelect.value, destinationSelect.value);
-  if (!context.valid) {
-    renderTransferWindowResults([], context.reason);
-    return;
-  }
-
-  const searchStartTime = Number(searchStartTimeInput?.value);
-  const searchEndTime = Number(searchEndTimeInput?.value);
-  const minDuration = Number(searchMinDurationInput?.value);
-  const maxDuration = Number(searchMaxDurationInput?.value);
-
-  const results = findTransferWindows(originSelect.value, destinationSelect.value, searchStartTime, searchEndTime, {
-    minDuration,
-    maxDuration,
-    maxCandidates: 10,
-  });
-
-  renderTransferWindowResults(results);
 }
 
 function updateLabels() {
@@ -645,7 +443,6 @@ function render(frameTime) {
   }
 
   updateBodies(getCurrentTime());
-  updateTransfer();
   updateLabels();
   controls.update();
   renderer.render(scene, camera);
@@ -678,43 +475,8 @@ if (rateModeToggle) {
 }
 
 timePlayToggle.addEventListener("click", togglePlayback);
-
-for (const element of [
-  departureTimeInput,
-  arrivalTimeInput,
-  originSelect,
-  destinationSelect,
-  showOrbitsInput,
-  showLabelsInput,
-  showSOIInput,
-]) {
-  element.addEventListener("input", () => {
-    updateTransferPlanDetails();
-    updateTransferSearchAvailability();
-    updateTransfer();
-  });
-  element.addEventListener("change", () => {
-    updateTransferPlanDetails();
-    updateTransferSearchAvailability();
-    updateTransfer();
-  });
-}
-
-if (searchTransferWindowsButton) {
-  searchTransferWindowsButton.addEventListener("click", searchTransferWindows);
-}
-
-for (const element of [originSelect, destinationSelect]) {
-  element.addEventListener("change", () => {
-    transferWindowResults?.replaceChildren();
-  });
-}
-
-populateSelectors();
 syncTimeInputsFromSeconds();
 updateTimeModeUI();
-updateTransferPlanDetails();
-updateTransferSearchAvailability();
 resizeRenderer();
 window.addEventListener("resize", resizeRenderer);
 focusOnBody("Kerbin");
