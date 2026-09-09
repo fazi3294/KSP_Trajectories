@@ -7,18 +7,18 @@ import {
   getScaledPosition,
   getScaledSOI,
 } from "./ksp-system.js";
+import { secondsToTimeParts, timePartsToSeconds } from "./time.js";
 
-const KERBIN_DAYS_PER_YEAR = 426;
-const KERBIN_HOURS_PER_DAY = 6;
-const SECONDS_PER_DAY = KERBIN_HOURS_PER_DAY * 60 * 60;
-const SECONDS_PER_YEAR = KERBIN_DAYS_PER_YEAR * SECONDS_PER_DAY;
 const CURSOR_SIZE_PX = 16;
-const MOON_VISIBILITY_THRESHOLD = 0.75;
+const MOON_VISIBILITY_THRESHOLD = 0.4;
 const DEFAULT_RATE_SECONDS = 1;
 
+const layoutRoot = document.querySelector("#layout");
+const panelToggle = document.querySelector("#panel-toggle");
 const viewport = document.querySelector("#viewport");
 const labelsRoot = document.querySelector("#labels");
 const currentTimeInput = document.querySelector("#current-time");
+const currentTimeSecondsField = document.querySelector("#current-time-seconds-field");
 const currentYearsInput = document.querySelector("#current-years");
 const currentDaysInput = document.querySelector("#current-days");
 const currentHoursInput = document.querySelector("#current-hours");
@@ -31,6 +31,8 @@ const rateDaysInput = document.querySelector("#rate-days");
 const rateHoursInput = document.querySelector("#rate-hours");
 const rateMinutesInput = document.querySelector("#rate-minutes");
 const rateSecondsInput = document.querySelector("#rate-seconds");
+const rateTimeInput = document.querySelector("#rate-time");
+const rateTimeSecondsField = document.querySelector("#rate-time-seconds-field");
 const timeModeToggle = document.querySelector("#time-parts-toggle");
 const timePartsFields = document.querySelector("#time-parts-fields");
 const rateModeToggle = document.querySelector("#rate-parts-toggle");
@@ -87,11 +89,14 @@ const labelEntries = [];
 const bodyStates = new Map();
 
 let currentTimeSeconds = Number(currentTimeInput.value) || 0;
+let playbackRateSecondsPerSecond = Math.max(DEFAULT_RATE_SECONDS, Number(rateTimeInput?.value) || DEFAULT_RATE_SECONDS);
 let isPlaying = false;
 let isUpdatingTimeInputs = false;
+let isUpdatingRateInputs = false;
 let lastFrameTime = performance.now();
 let useCompactTimeControls = false;
 let useCompactRateControls = false;
+let focusedBodyName = "Kerbin";
 
 function createLabel(name) {
   const label = document.createElement("div");
@@ -167,68 +172,11 @@ function parseIntegerInput(input, fallback = 0) {
   return Math.max(0, Math.floor(value));
 }
 
-function secondsToTimeParts(totalSeconds, asUT) {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  let remaining = safeSeconds;
-
-  const yearsElapsed = Math.floor(remaining / SECONDS_PER_YEAR);
-  remaining -= yearsElapsed * SECONDS_PER_YEAR;
-
-  const daysElapsed = Math.floor(remaining / SECONDS_PER_DAY);
-  remaining -= daysElapsed * SECONDS_PER_DAY;
-
-  const hours = Math.floor(remaining / 3600);
-  remaining -= hours * 3600;
-
-  const minutes = Math.floor(remaining / 60);
-  const seconds = remaining - minutes * 60;
-
-  if (asUT) {
-    return {
-      years: yearsElapsed + 1,
-      days: daysElapsed + 1,
-      hours,
-      minutes,
-      seconds,
-    };
-  }
-
-  return {
-    years: yearsElapsed,
-    days: daysElapsed,
-    hours,
-    minutes,
-    seconds,
-  };
-}
-
-function timePartsToSeconds(parts, asUT) {
-  const years = Math.max(0, Math.floor(parts.years));
-  const days = Math.max(0, Math.floor(parts.days));
-  const hours = Math.max(0, Math.floor(parts.hours));
-  const minutes = Math.max(0, Math.floor(parts.minutes));
-  const seconds = Math.max(0, Math.floor(parts.seconds));
-
-  if (asUT) {
-    const yearsElapsed = Math.max(0, years - 1);
-    const daysElapsed = Math.max(0, days - 1);
-    return (
-      yearsElapsed * SECONDS_PER_YEAR +
-      daysElapsed * SECONDS_PER_DAY +
-      hours * 3600 +
-      minutes * 60 +
-      seconds
-    );
-  }
-
-  return years * SECONDS_PER_YEAR + days * SECONDS_PER_DAY + hours * 3600 + minutes * 60 + seconds;
-}
-
 function syncTimeInputsFromSeconds() {
   isUpdatingTimeInputs = true;
   currentTimeInput.value = String(Math.floor(currentTimeSeconds));
 
-  const parts = secondsToTimeParts(currentTimeSeconds, timeUTModeInput.checked);
+  const parts = secondsToTimeParts(currentTimeSeconds, !timeUTModeInput.checked);
   currentYearsInput.value = String(parts.years);
   currentDaysInput.value = String(parts.days);
   currentHoursInput.value = String(parts.hours);
@@ -259,7 +207,7 @@ function updateCurrentTimeFromPartsInputs() {
       minutes: parseIntegerInput(currentMinutesInput),
       seconds: parseIntegerInput(currentSecondsInput),
     },
-    timeUTModeInput.checked,
+    !timeUTModeInput.checked,
   );
 
   syncTimeInputsFromSeconds();
@@ -269,17 +217,52 @@ function getCurrentTime() {
   return currentTimeSeconds;
 }
 
+function syncRateInputsFromSeconds() {
+  isUpdatingRateInputs = true;
+  const wholeSeconds = Math.floor(playbackRateSecondsPerSecond);
+  if (rateTimeInput) {
+    rateTimeInput.value = String(wholeSeconds);
+  }
+
+  const parts = secondsToTimeParts(wholeSeconds, false);
+  rateYearsInput.value = String(parts.years);
+  rateDaysInput.value = String(parts.days);
+  rateHoursInput.value = String(parts.hours);
+  rateMinutesInput.value = String(parts.minutes);
+  rateSecondsInput.value = String(parts.seconds);
+  isUpdatingRateInputs = false;
+}
+
+function updateRateFromSecondsInput() {
+  if (isUpdatingRateInputs || !rateTimeInput) {
+    return;
+  }
+
+  playbackRateSecondsPerSecond = clampTimeValue(Number(rateTimeInput.value)) || DEFAULT_RATE_SECONDS;
+  syncRateInputsFromSeconds();
+}
+
+function updateRateFromPartsInputs() {
+  if (isUpdatingRateInputs) {
+    return;
+  }
+
+  playbackRateSecondsPerSecond =
+    timePartsToSeconds(
+      {
+        years: parseIntegerInput(rateYearsInput),
+        days: parseIntegerInput(rateDaysInput),
+        hours: parseIntegerInput(rateHoursInput),
+        minutes: parseIntegerInput(rateMinutesInput),
+        seconds: parseIntegerInput(rateSecondsInput),
+      },
+      false,
+    ) || DEFAULT_RATE_SECONDS;
+  syncRateInputsFromSeconds();
+}
+
 function getPlaybackRateSecondsPerSecond() {
-  return timePartsToSeconds(
-    {
-      years: parseIntegerInput(rateYearsInput),
-      days: parseIntegerInput(rateDaysInput),
-      hours: parseIntegerInput(rateHoursInput),
-      minutes: parseIntegerInput(rateMinutesInput),
-      seconds: parseIntegerInput(rateSecondsInput),
-    },
-    false,
-  ) || DEFAULT_RATE_SECONDS;
+  return playbackRateSecondsPerSecond || DEFAULT_RATE_SECONDS;
 }
 
 function getWorldUnitsPerPixel(distance) {
@@ -312,6 +295,11 @@ function getDisplayRadius(body, mesh) {
 }
 
 function getVisibleMoonParent() {
+  const focusedState = bodyStates.get(focusedBodyName);
+  if (focusedState?.body?.name === "Kerbin") {
+    return "Kerbin";
+  }
+
   const thresholdPixels = Math.min(renderer.domElement.clientWidth, renderer.domElement.clientHeight) * MOON_VISIBILITY_THRESHOLD;
   let visibleParent = null;
   let bestDiameter = 0;
@@ -385,6 +373,7 @@ function focusOnBody(bodyName) {
     return;
   }
 
+  focusedBodyName = bodyName;
   controls.target.copy(state.mesh.position);
   const offset = camera.position
     .clone()
@@ -419,18 +408,21 @@ function togglePlayback() {
   timePlayToggle.textContent = isPlaying ? "Pause" : "Play";
 }
 
-function setCompactVisibility(enabled, fields, toggle) {
+function setCompactVisibility(enabled, secondsField, fields, toggle) {
+  if (secondsField) {
+    secondsField.hidden = !enabled;
+  }
   if (fields) {
-    fields.hidden = enabled;
+    fields.hidden = Boolean(enabled);
   }
   if (toggle) {
-    toggle.textContent = enabled ? "Pokaż pola" : "Uprość do sekund";
+    toggle.textContent = enabled ? "Pokaż Y/D/H/m/s" : "Uprość do sekund";
   }
 }
 
 function updateTimeModeUI() {
-  setCompactVisibility(useCompactTimeControls, timePartsFields, timeModeToggle);
-  setCompactVisibility(useCompactRateControls, ratePartsFields, rateModeToggle);
+  setCompactVisibility(useCompactTimeControls, currentTimeSecondsField, timePartsFields, timeModeToggle);
+  setCompactVisibility(useCompactRateControls, rateTimeSecondsField, ratePartsFields, rateModeToggle);
 }
 
 function render(frameTime) {
@@ -453,6 +445,12 @@ currentTimeInput.addEventListener("input", updateCurrentTimeFromSecondsInput);
 for (const input of [currentYearsInput, currentDaysInput, currentHoursInput, currentMinutesInput, currentSecondsInput]) {
   input.addEventListener("input", updateCurrentTimeFromPartsInputs);
 }
+for (const input of [rateYearsInput, rateDaysInput, rateHoursInput, rateMinutesInput, rateSecondsInput]) {
+  input.addEventListener("input", updateRateFromPartsInputs);
+}
+if (rateTimeInput) {
+  rateTimeInput.addEventListener("input", updateRateFromSecondsInput);
+}
 
 if (timeUTModeInput) {
   timeUTModeInput.addEventListener("change", () => {
@@ -474,8 +472,20 @@ if (rateModeToggle) {
   });
 }
 
+if (panelToggle && layoutRoot) {
+  panelToggle.addEventListener("click", () => {
+    const isCollapsed = layoutRoot.classList.toggle("panel-collapsed");
+    panelToggle.textContent = isCollapsed ? "▶" : "◀";
+    panelToggle.setAttribute("aria-expanded", String(!isCollapsed));
+    panelToggle.setAttribute("aria-label", isCollapsed ? "Pokaż panel ustawień" : "Ukryj panel ustawień");
+    panelToggle.title = isCollapsed ? "Pokaż panel ustawień" : "Ukryj panel ustawień";
+    resizeRenderer();
+  });
+}
+
 timePlayToggle.addEventListener("click", togglePlayback);
 syncTimeInputsFromSeconds();
+syncRateInputsFromSeconds();
 updateTimeModeUI();
 resizeRenderer();
 window.addEventListener("resize", resizeRenderer);
