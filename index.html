@@ -18,90 +18,74 @@
     <div class="layout">
       <aside class="panel">
         <h1>KSP Trajectories</h1>
-        <label>
-          Bieżący czas [s]
-          <input id="current-time" type="number" min="0" step="1" value="0" />
-        </label>
-        <label class="time-mode">
-          <input id="time-ut-mode" type="checkbox" />
-          Tryb UT (czas 0 gry = Rok 1, Dzień 1)
-        </label>
-        <div class="time-grid">
+        <div class="panel-section">
+          <div class="section-header">
+            <span>Bieżący czas</span>
+            <button id="time-parts-toggle" type="button">Uprość do sekund</button>
+          </div>
           <label>
-            Rok
-            <input id="current-years" type="number" min="0" step="1" value="0" />
+            Czas [s]
+            <input id="current-time" type="number" min="0" step="1" value="0" />
           </label>
-          <label>
-            Dzień
-            <input id="current-days" type="number" min="0" step="1" value="0" />
+          <label class="time-mode">
+            <input id="time-ut-mode" type="checkbox" />
+            Tryb UT (czas 0 gry = Rok 1, Dzień 1)
           </label>
-          <label>
-            Godzina
-            <input id="current-hours" type="number" min="0" step="1" value="0" />
-          </label>
-          <label>
-            Minuta
-            <input id="current-minutes" type="number" min="0" step="1" value="0" />
-          </label>
-          <label>
-            Sekunda
-            <input id="current-seconds" type="number" min="0" step="1" value="0" />
-          </label>
-        </div>
-        <div class="playback">
-          <button id="time-play-toggle" type="button">Play</button>
-          <p>Prędkość (na 1 sekundę czasu rzeczywistego):</p>
-          <div class="time-grid speed-grid">
-            <label>
-              Lata
-              <input id="rate-years" type="number" min="0" step="1" value="0" />
-            </label>
-            <label>
-              Dni
-              <input id="rate-days" type="number" min="0" step="1" value="0" />
-            </label>
-            <label>
-              Godziny
-              <input id="rate-hours" type="number" min="0" step="1" value="0" />
-            </label>
-            <label>
-              Minuty
-              <input id="rate-minutes" type="number" min="0" step="1" value="0" />
-            </label>
-            <label>
-              Sekundy
-              <input id="rate-seconds" type="number" min="0" step="1" value="1" />
-            </label>
+          <div id="time-parts-fields" class="time-group">
+            <label><span>Y:</span><input id="current-years" type="number" min="0" step="1" value="0" /></label>
+            <label><span>D:</span><input id="current-days" type="number" min="0" step="1" value="0" /></label>
+            <label><span>H:</span><input id="current-hours" type="number" min="0" step="1" value="0" /></label>
+            <label><span>m:</span><input id="current-minutes" type="number" min="0" step="1" value="0" /></label>
+            <label><span>s:</span><input id="current-seconds" type="number" min="0" step="1" value="0" /></label>
           </div>
         </div>
 
-        <div class="toggles">
-          <label><input id="show-orbits" type="checkbox" checked /> Pokaż orbity</label>
-          <label><input id="show-labels" type="checkbox" checked /> Pokaż nazwy</label>
-          <label><input id="show-soi" type="checkbox" /> Pokaż SOI</label>
+        <div class="panel-section">
+          <div class="section-header">
+            <span>Odtwarzanie</span>
+            <button id="rate-parts-toggle" type="button">Uprość do sekund</button>
+          </div>
+          <button id="time-play-toggle" type="button">Play</button>
+          <p>Prędkość animacji (na 1 sekundę czasu rzeczywistego):</p>
+          <div id="rate-parts-fields" class="time-group speed-group">
+            <label><span>Y:</span><input id="rate-years" type="number" min="0" step="1" value="0" /></label>
+            <label><span>D:</span><input id="rate-days" type="number" min="0" step="1" value="0" /></label>
+            <label><span>H:</span><input id="rate-hours" type="number" min="0" step="1" value="0" /></label>
+            <label><span>m:</span><input id="rate-minutes" type="number" min="0" step="1" value="0" /></label>
+            <label><span>s:</span><input id="rate-seconds" type="number" min="0" step="1" value="1" /></label>
+          </div>
         </div>
 
-        <h2>Transfer</h2>
-        <label>
-          Start
-          <select id="origin"></select>
-        </label>
-        <label>
-          Cel
-          <select id="destination"></select>
-        </label>
-        <label>
-          Czas opuszczenia SOI [s]
-          <input id="departure-time" type="number" min="0" step="1000" value="0" />
-        </label>
-        <label>
-          Czas osiągnięcia SOI celu [s]
-          <input id="arrival-time" type="number" min="0" step="1000" value="5000000" />
-        </label>
-        <p id="transfer-summary"></p>
-        <p class="hint">
-          Podwójne kliknięcie na planetę lub księżyc ustawia fokus kamery.
-        </p>
+        <div class="panel-section">
+          <h2>Widoczność</h2>
+          <div class="toggles">
+            <label><input id="show-orbits" type="checkbox" checked /> Pokaż orbity</label>
+            <label><input id="show-labels" type="checkbox" checked /> Pokaż nazwy</label>
+            <label><input id="show-soi" type="checkbox" /> Pokaż SOI</label>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h2>Transfer</h2>
+          <label>
+            Start
+            <select id="origin"></select>
+          </label>
+          <label>
+            Cel
+            <select id="destination"></select>
+          </label>
+          <label>
+            Czas opuszczenia SOI [s]
+            <input id="departure-time" type="number" min="0" step="1000" value="0" />
+          </label>
+          <label>
+            Czas osiągnięcia SOI celu [s]
+            <input id="arrival-time" type="number" min="0" step="1000" value="5000000" />
+          </label>
+          <p id="transfer-summary"></p>
+          <p class="hint">Podwójne kliknięcie na planetę lub księżyc ustawia fokus kamery.</p>
+        </div>
       </aside>
 
       <main class="viewport-wrap">
@@ -112,4 +96,4 @@
 
     <script type="module" src="./src/app.js"></script>
   </body>
-  </html>
+</html>

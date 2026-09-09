@@ -15,6 +15,7 @@ const SECONDS_PER_DAY = KERBIN_HOURS_PER_DAY * 60 * 60;
 const SECONDS_PER_YEAR = KERBIN_DAYS_PER_YEAR * SECONDS_PER_DAY;
 const CURSOR_SIZE_PX = 16;
 const MOON_VISIBILITY_THRESHOLD = 0.75;
+const DEFAULT_RATE_SECONDS = 1;
 
 const viewport = document.querySelector("#viewport");
 const labelsRoot = document.querySelector("#labels");
@@ -31,6 +32,10 @@ const rateDaysInput = document.querySelector("#rate-days");
 const rateHoursInput = document.querySelector("#rate-hours");
 const rateMinutesInput = document.querySelector("#rate-minutes");
 const rateSecondsInput = document.querySelector("#rate-seconds");
+const timeModeToggle = document.querySelector("#time-parts-toggle");
+const timePartsFields = document.querySelector("#time-parts-fields");
+const rateModeToggle = document.querySelector("#rate-parts-toggle");
+const ratePartsFields = document.querySelector("#rate-parts-fields");
 const departureTimeInput = document.querySelector("#departure-time");
 const arrivalTimeInput = document.querySelector("#arrival-time");
 const originSelect = document.querySelector("#origin");
@@ -59,7 +64,7 @@ const maxCameraDistance = (systemOuterRadius / Math.tan(THREE.MathUtils.degToRad
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.minDistance = 3;
+controls.minDistance = 0.75;
 controls.maxDistance = maxCameraDistance;
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -92,6 +97,8 @@ let currentTimeSeconds = Number(currentTimeInput.value) || 0;
 let isPlaying = false;
 let isUpdatingTimeInputs = false;
 let lastFrameTime = performance.now();
+let useCompactTimeControls = false;
+let useCompactRateControls = false;
 
 function createLabel(name) {
   const label = document.createElement("div");
@@ -313,7 +320,7 @@ function getPlaybackRateSecondsPerSecond() {
       seconds: parseIntegerInput(rateSecondsInput),
     },
     false,
-  );
+  ) || DEFAULT_RATE_SECONDS;
 }
 
 function toVector(position) {
@@ -482,7 +489,7 @@ function focusOnBody(bodyName) {
     .clone()
     .sub(controls.target)
     .normalize()
-    .multiplyScalar(Math.max(getDisplayRadius(state.body, state.mesh) * 8, 16));
+    .multiplyScalar(Math.max(getDisplayRadius(state.body, state.mesh) * 3, 6));
   camera.position.copy(state.mesh.position.clone().add(offset));
   controls.update();
 }
@@ -511,6 +518,20 @@ function togglePlayback() {
   timePlayToggle.textContent = isPlaying ? "Pause" : "Play";
 }
 
+function setCompactVisibility(enabled, fields, toggle) {
+  if (fields) {
+    fields.hidden = enabled;
+  }
+  if (toggle) {
+    toggle.textContent = enabled ? "Pokaż pola" : "Uprość do sekund";
+  }
+}
+
+function updateTimeModeUI() {
+  setCompactVisibility(useCompactTimeControls, timePartsFields, timeModeToggle);
+  setCompactVisibility(useCompactRateControls, ratePartsFields, rateModeToggle);
+}
+
 function render(frameTime) {
   const deltaSeconds = Math.max(0, (frameTime - lastFrameTime) / 1000);
   lastFrameTime = frameTime;
@@ -533,9 +554,25 @@ for (const input of [currentYearsInput, currentDaysInput, currentHoursInput, cur
   input.addEventListener("input", updateCurrentTimeFromPartsInputs);
 }
 
-timeUTModeInput.addEventListener("change", () => {
-  syncTimeInputsFromSeconds();
-});
+if (timeUTModeInput) {
+  timeUTModeInput.addEventListener("change", () => {
+    syncTimeInputsFromSeconds();
+  });
+}
+
+if (timeModeToggle) {
+  timeModeToggle.addEventListener("click", () => {
+    useCompactTimeControls = !useCompactTimeControls;
+    updateTimeModeUI();
+  });
+}
+
+if (rateModeToggle) {
+  rateModeToggle.addEventListener("click", () => {
+    useCompactRateControls = !useCompactRateControls;
+    updateTimeModeUI();
+  });
+}
 
 timePlayToggle.addEventListener("click", togglePlayback);
 
@@ -558,6 +595,7 @@ for (const element of [
 
 populateSelectors();
 syncTimeInputsFromSeconds();
+updateTimeModeUI();
 resizeRenderer();
 window.addEventListener("resize", resizeRenderer);
 focusOnBody("Kerbin");
