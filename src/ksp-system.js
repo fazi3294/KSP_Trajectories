@@ -263,3 +263,191 @@ export function getTransferState(originName, destinationName, departureTime, arr
     end,
   };
 }
+
+function normalizeAngle(angleRadians) {
+  const fullTurn = Math.PI * 2;
+  let normalized = angleRadians % fullTurn;
+  if (normalized < 0) {
+    normalized += fullTurn;
+  }
+  return normalized;
+}
+
+function angleDifference(left, right) {
+  const fullTurn = Math.PI * 2;
+  const delta = normalizeAngle(left - right);
+  return Math.min(delta, fullTurn - delta);
+}
+
+function magnitude(vector) {
+  return Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z);
+}
+
+function normalize(vector) {
+  const length = magnitude(vector);
+  if (length === 0) {
+    return { x: 0, y: 0, z: 0 };
+  }
+  return {
+    x: vector.x / length,
+    y: vector.y / length,
+    z: vector.z / length,
+  };
+}
+
+function subtractVectors(left, right) {
+  return {
+    x: left.x - right.x,
+    y: left.y - right.y,
+    z: left.z - right.z,
+  };
+}
+
+function dot(left, right) {
+  return left.x * right.x + left.y * right.y + left.z * right.z;
+}
+
+function cross(left, right) {
+  return {
+    x: left.y * right.z - left.z * right.y,
+    y: left.z * right.x - left.x * right.z,
+    z: left.x * right.y - left.y * right.x,
+  };
+}
+
+function clamp(value, minValue, maxValue) {
+  return Math.min(maxValue, Math.max(minValue, value));
+}
+
+function getBodyVelocity(bodyName, timeSeconds) {
+  const delta = 60;
+  const before = getBodyPosition(bodyName, timeSeconds - delta);
+  const after = getBodyPosition(bodyName, timeSeconds + delta);
+  return {
+    x: (after.x - before.x) / (2 * delta),
+    y: (after.y - before.y) / (2 * delta),
+    z: (after.z - before.z) / (2 * delta),
+  };
+}
+
+function getHohmannDuration(originBody, destinationBody) {
+  if (!originBody.parent || originBody.parent !== destinationBody.parent) {
+    return null;
+  }
+  if (!originBody.semiMajorAxis || !destinationBody.semiMajorAxis || !originBody.orbitalPeriod) {
+    return null;
+  }
+
+  const gravitationalParameter =
+    (4 * Math.PI * Math.PI * originBody.semiMajorAxis ** 3) / (originBody.orbitalPeriod ** 2);
+  const transferSemiMajorAxis = (originBody.semiMajorAxis + destinationBody.semiMajorAxis) / 2;
+  return Math.PI * Math.sqrt((transferSemiMajorAxis ** 3) / gravitationalParameter);
+}
+
+function getAngularPhaseFromParent(originName, destinationName, timeSeconds) {
+  const originBody = getBody(originName);
+  const destinationBody = getBody(destinationName);
+  if (!originBody?.parent || originBody.parent !== destinationBody?.parent) {
+    return null;
+  }
+
+  const parentPosition = getBodyPosition(originBody.parent, timeSeconds);
+  const originPosition = subtractVectors(getBodyPosition(originName, timeSeconds), parentPosition);
+  const destinationPosition = subtractVectors(getBodyPosition(destinationName, timeSeconds), parentPosition);
+  const originAngle = Math.atan2(originPosition.z, originPosition.x);
+  const destinationAngle = Math.atan2(destinationPosition.z, destinationPosition.x);
+  return normalizeAngle(destinationAngle - originAngle);
+}
+
+function scoreTransferCandidate(originName, destinationName, departureTime, arrivalTime) {
+  const duration = arrivalTime - departureTime;
+  const originBody = getBody(originName);
+  const destinationBody = getBody(destinationName);
+  const originDeparture = getBodyPosition(originName, departureTime);
+  const destinationArrival = getBodyPosition(destinationName, arrivalTime);
+  const transferDirection = normalize(subtractVectors(destinationArrival, originDeparture));
+  const originVelocity = normalize(getBodyVelocity(originName, departureTime));
+  const destinationVelocity = normalize(getBodyVelocity(destinationName, arrivalTime));
+  const departureAlignmentPenalty = 1 - clamp(dot(originVelocity, transferDirection), -1, 1);
+  const arrivalAlignmentPenalty = 1 - clamp(dot(destinationVelocity, transferDirection), -1, 1);
+
+  let phasePenalty = 0.35;
+  let durationPenalty = 0.35;
+  const phaseAtDeparture = getAngularPhaseFromParent(originName, destinationName, departureTime);
+  const hohmannDuration = getHohmannDuration(originBody, destinationBody);
+  if (phaseAtDeparture !== null && destinationBody?.orbitalPeriod) {
+    const destinationMeanMotion = (2 * Math.PI) / destinationBody.orbitalPeriod;
+    const expectedPhase = normalizeAngle(Math.PI - destinationMeanMotion * duration);
+    phasePenalty = angleDifference(phaseAtDeparture, expectedPhase) / Math.PI;
+  }
+  if (hohmannDuration) {
+    durationPenalty = Math.min(1, Math.abs(duration - hohmannDuration) / hohmannDuration);
+  }
+
+  const originOrbitNormal = normalize(cross(originDeparture, getBodyVelocity(originName, departureTime)));
+  const destinationOrbitNormal = normalize(cross(destinationArrival, getBodyVelocity(destinationName, arrivalTime)));
+  const planePenalty = 0.5 * (1 - clamp(dot(originOrbitNormal, destinationOrbitNormal), -1, 1));
+
+  const rawScore =
+    phasePenalty * 0.45 +
+    durationPenalty * 0.25 +
+    departureAlignmentPenalty * 0.2 +
+    arrivalAlignmentPenalty * 0.05 +
+    planePenalty * 0.05;
+
+  return Math.max(0, rawScore * 100);
+}
+
+export function findTransferWindows(originName, destinationName, searchStartTime, searchEndTime, options = {}) {
+  if (originName === destinationName) {
+    return [];
+  }
+
+  if (
+    !Number.isFinite(searchStartTime) ||
+    !Number.isFinite(searchEndTime) ||
+    searchEndTime <= searchStartTime
+  ) {
+    return [];
+  }
+
+  const minDuration = Math.max(60, Number(options.minDuration ?? 60 * 60 * 6));
+  const maxDuration = Math.max(minDuration, Number(options.maxDuration ?? 60 * 60 * 24 * 200));
+  const departureStep = Math.max(60, Number(options.departureStep ?? 60 * 60 * 6));
+  const durationStep = Math.max(60, Number(options.durationStep ?? 60 * 60 * 6));
+  const maxCandidates = Math.max(1, Math.floor(Number(options.maxCandidates ?? 8)));
+  const minSeparation = Math.max(departureStep, Number(options.minSeparation ?? departureStep * 2));
+  const candidates = [];
+
+  for (let departureTime = searchStartTime; departureTime <= searchEndTime; departureTime += departureStep) {
+    for (let duration = minDuration; duration <= maxDuration; duration += durationStep) {
+      const arrivalTime = departureTime + duration;
+      const score = scoreTransferCandidate(originName, destinationName, departureTime, arrivalTime);
+      candidates.push({
+        departureTime,
+        arrivalTime,
+        duration,
+        score: Number(score.toFixed(2)),
+      });
+    }
+  }
+
+  candidates.sort((left, right) => left.score - right.score);
+  const filtered = [];
+  for (const candidate of candidates) {
+    if (filtered.length >= maxCandidates) {
+      break;
+    }
+
+    const isTooClose = filtered.some(
+      (entry) =>
+        Math.abs(entry.departureTime - candidate.departureTime) < minSeparation &&
+        Math.abs(entry.arrivalTime - candidate.arrivalTime) < minSeparation,
+    );
+    if (!isTooClose) {
+      filtered.push(candidate);
+    }
+  }
+
+  return filtered;
+}
