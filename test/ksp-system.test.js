@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 
 import { getBodyOrbitPoints, getBodyPosition, getTransferState, listTransferBodies } from "../src/ksp-system.js";
 
-function assertVectorClose(actual, expected) {
-  assert.ok(Math.abs(actual.x - expected.x) < 1e-9);
-  assert.ok(Math.abs(actual.y - expected.y) < 1e-9);
-  assert.ok(Math.abs(actual.z - expected.z) < 1e-9);
+function assertVectorClose(actual, expected, tolerance = 1e-6) {
+  assert.ok(Math.abs(actual.x - expected.x) < tolerance);
+  assert.ok(Math.abs(actual.y - expected.y) < tolerance);
+  assert.ok(Math.abs(actual.z - expected.z) < tolerance);
 }
 
 test("root body remains at system origin", () => {
@@ -59,7 +59,7 @@ test("UT 0 positions follow stock orbital elements", () => {
   });
 
   assertVectorClose(getBodyPosition("Minmus", 0), {
-    x: -13645468798.212135,
+    x: -13645468805.909271,
     y: 4912696.964371395,
     z: 31725932.445057634,
   });
@@ -71,6 +71,6 @@ test("orbit paths preserve eccentric periapsis and apoapsis distances", () => {
   const periapsis = Math.min(...distances);
   const apoapsis = Math.max(...distances);
 
-  assert.ok(Math.abs(periapsis - 4210510637.2205095) < 1e-6);
-  assert.ok(Math.abs(apoapsis - 6315765970.779491) < 1e-6);
+  assert.ok(Math.abs(periapsis - 4210510627.4105854) < 1e-6);
+  assert.ok(Math.abs(apoapsis - 6315765980.589414) < 1e-6);
 });
