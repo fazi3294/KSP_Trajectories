@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { findTransferWindows, getBodyPosition, getTransferState, listTransferBodies } from "../src/ksp-system.js";
+import { findTransferWindows, getBodyOrbitPoints, getBodyPosition, getTransferState, listTransferBodies } from "../src/ksp-system.js";
 
-function assertVectorClose(actual, expected) {
-  assert.ok(Math.abs(actual.x - expected.x) < 1e-9);
-  assert.ok(Math.abs(actual.y - expected.y) < 1e-9);
-  assert.ok(Math.abs(actual.z - expected.z) < 1e-9);
+function assertVectorClose(actual, expected, tolerance = 1e-6) {
+  assert.ok(Math.abs(actual.x - expected.x) < tolerance);
+  assert.ok(Math.abs(actual.y - expected.y) < tolerance);
+  assert.ok(Math.abs(actual.z - expected.z) < tolerance);
 }
 
 test("root body remains at system origin", () => {
@@ -43,6 +43,36 @@ test("transfer selectors include planets and moons but not the star", () => {
   assert.equal(names.includes("Kerbol"), false);
   assert.equal(names.includes("Kerbin"), true);
   assert.equal(names.includes("Mun"), true);
+});
+
+test("UT 0 positions follow stock orbital elements", () => {
+  assertVectorClose(getBodyPosition("Kerbin", 0), {
+    x: -13599823007.697136,
+    y: 0,
+    z: 21659825.247473374,
+  });
+
+  assertVectorClose(getBodyPosition("Moho", 0), {
+    x: -568676232.2539349,
+    y: -198406748.03839207,
+    z: -6286981017.636776,
+  });
+
+  assertVectorClose(getBodyPosition("Minmus", 0), {
+    x: -13645468805.909271,
+    y: 4912696.964371395,
+    z: 31725932.445057634,
+  });
+});
+
+test("orbit paths preserve eccentric periapsis and apoapsis distances", () => {
+  const mohoPoints = getBodyOrbitPoints("Moho", 256);
+  const distances = mohoPoints.map((point) => Math.hypot(point.x, point.y, point.z));
+  const periapsis = Math.min(...distances);
+  const apoapsis = Math.max(...distances);
+
+  assert.ok(Math.abs(periapsis - 4210510627.4105854) < 1e-6);
+  assert.ok(Math.abs(apoapsis - 6315765980.589414) < 1e-6);
 });
 
 test("transfer window search returns ranked candidates with required fields", () => {

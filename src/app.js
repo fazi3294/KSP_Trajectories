@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   BODIES,
   DISTANCE_SCALE,
+  getBodyOrbitPoints,
   findTransferWindows,
   getScaledPosition,
   getScaledSOI,
@@ -120,20 +121,11 @@ function createOrbit(body) {
     return null;
   }
 
-  const points = [];
-  const inclination = THREE.MathUtils.degToRad(body.inclinationDeg ?? 0);
-  for (let index = 0; index <= 256; index += 1) {
-    const angle = (index / 256) * Math.PI * 2;
-    points.push(
-      new THREE.Vector3(
-        Math.cos(angle) * body.semiMajorAxis * DISTANCE_SCALE,
-        Math.sin(angle) * Math.sin(inclination) * body.semiMajorAxis * DISTANCE_SCALE,
-        Math.sin(angle) * Math.cos(inclination) * body.semiMajorAxis * DISTANCE_SCALE,
-      ),
-    );
-  }
-
-  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const geometry = new THREE.BufferGeometry().setFromPoints(
+    getBodyOrbitPoints(body.name).map(
+      (point) => new THREE.Vector3(point.x * DISTANCE_SCALE, point.y * DISTANCE_SCALE, point.z * DISTANCE_SCALE),
+    ),
+  );
   const line = new THREE.LineLoop(
     geometry,
     new THREE.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.85 }),
