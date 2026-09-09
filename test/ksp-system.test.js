@@ -73,6 +73,18 @@ test("UT 0 positions follow stock orbital elements", () => {
   });
 });
 
+test("time propagation moves a reference-plane orbit counterclockwise in the front view", () => {
+  const start = getBodyPosition("Kerbin", 0);
+  const next = getBodyPosition("Kerbin", 60);
+  const startScreenY = -start.z;
+  const nextScreenY = -next.z;
+  const signedTurn =
+    start.x * nextScreenY -
+    startScreenY * next.x;
+
+  assert.ok(signedTurn > 0);
+});
+
 test("orbit paths preserve eccentric periapsis and apoapsis distances", () => {
   const mohoPoints = getBodyOrbitPoints("Moho", 256);
   const distances = mohoPoints.map((point) => Math.hypot(point.x, point.y, point.z));
