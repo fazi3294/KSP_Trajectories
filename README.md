@@ -30,7 +30,10 @@ npm test
 ## 🎮 Funkcje
 
 - **3D wizualizacja układu** – Kerbol, planety i księżyce w rzeczywistych pozycjach orbitalnych
+- **Stałe markery ekranowe** – Słońce i planety utrzymują czytelny rozmiar punktu przy oddaleniu, a przy zbliżeniu płynnie przechodzą do skali rzeczywistej
 - **Kontrola kamery** – zoom, rotacja, dowolny kąt oglądania
+- **Filtrowanie księżyców** – księżyce i ich nazwy pojawiają się dopiero po zbliżeniu do planety (SOI planety > 3/4 ekranu)
 - **Interakcja** – podwójne kliknięcie na planetę ustawia fokus kamery
 - **Toggles** – pokaż/ukryj orbity, nazwy ciał niebieskich, sfery SOI
+- **Sterowanie czasem** – sekundy oraz pola rok/dzień/godzina/minuta/sekunda, przełącznik czasu gry/UT i odtwarzanie czasu (Play/Pause) z regulacją prędkości
 - **Wizualizacja transferu** – wprowadź start, cel i czasy, aby zobaczyć trajektorię transferu ze statkiem

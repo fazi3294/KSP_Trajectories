@@ -3,7 +3,6 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   BODIES,
   DISTANCE_SCALE,
-  getBody,
   getScaledPosition,
   getScaledSOI,
   getTransferState,
@@ -12,8 +11,6 @@ import {
 
 const KERBIN_DAYS_PER_YEAR = 426;
 const KERBIN_HOURS_PER_DAY = 6;
-const SECONDS_PER_MINUTE = 60;
-const SECONDS_PER_HOUR = KERBIN_HOURS_PER_DAY * SECONDS_PER_MINUTE * 10;
 const SECONDS_PER_DAY = KERBIN_HOURS_PER_DAY * 60 * 60;
 const SECONDS_PER_YEAR = KERBIN_DAYS_PER_YEAR * SECONDS_PER_DAY;
 const CURSOR_SIZE_PX = 16;
