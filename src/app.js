@@ -10,7 +10,7 @@ import {
 import { secondsToTimeParts, timePartsToSeconds } from "./time.js";
 
 const CURSOR_SIZE_PX = 16;
-const MOON_VISIBILITY_THRESHOLD = 0.4;
+const MOON_VISIBILITY_THRESHOLD = 0.75;
 const DEFAULT_RATE_SECONDS = 1;
 
 const layoutRoot = document.querySelector("#layout");
@@ -40,11 +40,14 @@ const ratePartsFields = document.querySelector("#rate-parts-fields");
 const showOrbitsInput = document.querySelector("#show-orbits");
 const showLabelsInput = document.querySelector("#show-labels");
 const showSOIInput = document.querySelector("#show-soi");
+const showEclipticInput = document.querySelector("#show-ecliptic");
+const panelWidthInput = document.querySelector("#panel-width");
+const panelWidthValue = document.querySelector("#panel-width-value");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x020617);
 
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 5000);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.01, 5000);
 camera.position.set(0, 80, 220);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -60,7 +63,7 @@ const maxCameraDistance = (systemOuterRadius / Math.tan(THREE.MathUtils.degToRad
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.minDistance = 0.75;
+controls.minDistance = 0.05;
 controls.maxDistance = maxCameraDistance;
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
@@ -81,6 +84,18 @@ scene.add(stars);
 const orbitGroup = new THREE.Group();
 const soiGroup = new THREE.Group();
 scene.add(orbitGroup, soiGroup);
+const eclipticPlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(systemOuterRadius * 2.4, systemOuterRadius * 2.4),
+  new THREE.MeshBasicMaterial({
+    color: 0x38bdf8,
+    transparent: true,
+    opacity: 0.06,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  }),
+);
+eclipticPlane.rotation.x = -Math.PI / 2;
+scene.add(eclipticPlane);
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -96,7 +111,6 @@ let isUpdatingRateInputs = false;
 let lastFrameTime = performance.now();
 let useCompactTimeControls = false;
 let useCompactRateControls = false;
-let focusedBodyName = "Kerbin";
 
 function createLabel(name) {
   const label = document.createElement("div");
@@ -295,11 +309,6 @@ function getDisplayRadius(body, mesh) {
 }
 
 function getVisibleMoonParent() {
-  const focusedState = bodyStates.get(focusedBodyName);
-  if (focusedState?.body?.name === "Kerbin") {
-    return "Kerbin";
-  }
-
   const thresholdPixels = Math.min(renderer.domElement.clientWidth, renderer.domElement.clientHeight) * MOON_VISIBILITY_THRESHOLD;
   let visibleParent = null;
   let bestDiameter = 0;
@@ -373,14 +382,9 @@ function focusOnBody(bodyName) {
     return;
   }
 
-  focusedBodyName = bodyName;
+  const targetOffset = state.mesh.position.clone().sub(controls.target);
   controls.target.copy(state.mesh.position);
-  const offset = camera.position
-    .clone()
-    .sub(controls.target)
-    .normalize()
-    .multiplyScalar(Math.max(getDisplayRadius(state.body, state.mesh) * 3, 6));
-  camera.position.copy(state.mesh.position.clone().add(offset));
+  camera.position.add(targetOffset);
   controls.update();
 }
 
@@ -423,6 +427,18 @@ function setCompactVisibility(enabled, secondsField, fields, toggle) {
 function updateTimeModeUI() {
   setCompactVisibility(useCompactTimeControls, currentTimeSecondsField, timePartsFields, timeModeToggle);
   setCompactVisibility(useCompactRateControls, rateTimeSecondsField, ratePartsFields, rateModeToggle);
+}
+
+function updatePanelWidth() {
+  if (!panelWidthInput || !layoutRoot) {
+    return;
+  }
+
+  const width = Math.max(280, Math.min(640, Number(panelWidthInput.value) || 420));
+  layoutRoot.style.setProperty("--panel-width", `${width}px`);
+  if (panelWidthValue) {
+    panelWidthValue.textContent = `${width}px`;
+  }
 }
 
 function render(frameTime) {
@@ -470,6 +486,18 @@ if (rateModeToggle) {
     useCompactRateControls = !useCompactRateControls;
     updateTimeModeUI();
   });
+}
+
+if (showEclipticInput) {
+  showEclipticInput.addEventListener("change", () => {
+    eclipticPlane.visible = showEclipticInput.checked;
+  });
+  eclipticPlane.visible = showEclipticInput.checked;
+}
+
+if (panelWidthInput) {
+  panelWidthInput.addEventListener("input", updatePanelWidth);
+  updatePanelWidth();
 }
 
 if (panelToggle && layoutRoot) {
