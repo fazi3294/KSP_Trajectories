@@ -4,6 +4,7 @@ import {
   BODIES,
   DISTANCE_SCALE,
   getBodyOrbitPoints,
+  findTransferWindows,
   getScaledPosition,
   getScaledSOI,
   getTransferState,
@@ -41,6 +42,12 @@ const departureTimeInput = document.querySelector("#departure-time");
 const arrivalTimeInput = document.querySelector("#arrival-time");
 const originSelect = document.querySelector("#origin");
 const destinationSelect = document.querySelector("#destination");
+const searchStartTimeInput = document.querySelector("#search-start-time");
+const searchEndTimeInput = document.querySelector("#search-end-time");
+const searchMinDurationInput = document.querySelector("#search-min-duration");
+const searchMaxDurationInput = document.querySelector("#search-max-duration");
+const searchTransferWindowsButton = document.querySelector("#search-transfer-windows");
+const transferWindowResults = document.querySelector("#transfer-window-results");
 const showOrbitsInput = document.querySelector("#show-orbits");
 const showLabelsInput = document.querySelector("#show-labels");
 const showSOIInput = document.querySelector("#show-soi");
@@ -315,6 +322,11 @@ function getPlaybackRateSecondsPerSecond() {
   ) || DEFAULT_RATE_SECONDS;
 }
 
+function formatSecondsCompact(totalSeconds) {
+  const parts = secondsToTimeParts(totalSeconds, false);
+  return `${parts.years}Y ${parts.days}D ${parts.hours}H ${parts.minutes}m ${parts.seconds}s`;
+}
+
 function toVector(position) {
   return new THREE.Vector3(position.x, position.y, position.z);
 }
@@ -451,6 +463,57 @@ function updateTransfer() {
   )}%`;
 }
 
+function selectTransferWindow(result) {
+  departureTimeInput.value = String(Math.floor(result.departureTime));
+  arrivalTimeInput.value = String(Math.floor(result.arrivalTime));
+  updateTransfer();
+}
+
+function renderTransferWindowResults(results) {
+  if (!transferWindowResults) {
+    return;
+  }
+
+  transferWindowResults.replaceChildren();
+  if (results.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = "Brak wyników dla wybranego zakresu.";
+    transferWindowResults.appendChild(empty);
+    return;
+  }
+
+  for (const result of results) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `Start: ${Math.floor(result.departureTime)} s | Cel: ${Math.floor(
+      result.arrivalTime,
+    )} s | Lot: ${formatSecondsCompact(result.duration)} | Score: ${result.score.toFixed(2)}`;
+    button.addEventListener("click", () => {
+      selectTransferWindow(result);
+    });
+    item.appendChild(button);
+    transferWindowResults.appendChild(item);
+  }
+}
+
+function searchTransferWindows() {
+  const searchStartTime = Number(searchStartTimeInput?.value);
+  const searchEndTime = Number(searchEndTimeInput?.value);
+  const minDuration = Number(searchMinDurationInput?.value);
+  const maxDuration = Number(searchMaxDurationInput?.value);
+
+  const results = findTransferWindows(originSelect.value, destinationSelect.value, searchStartTime, searchEndTime, {
+    minDuration,
+    maxDuration,
+    departureStep: 60 * 60 * 12,
+    durationStep: 60 * 60 * 12,
+    maxCandidates: 10,
+  });
+
+  renderTransferWindowResults(results);
+}
+
 function updateLabels() {
   for (const { mesh, label } of labelEntries) {
     if (!showLabelsInput.checked || !mesh.visible) {
@@ -583,6 +646,10 @@ for (const element of [
   element.addEventListener("change", () => {
     updateTransfer();
   });
+}
+
+if (searchTransferWindowsButton) {
+  searchTransferWindowsButton.addEventListener("click", searchTransferWindows);
 }
 
 populateSelectors();

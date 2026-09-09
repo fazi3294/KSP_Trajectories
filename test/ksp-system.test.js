@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { getBodyOrbitPoints, getBodyPosition, getTransferState, listTransferBodies } from "../src/ksp-system.js";
+import { findTransferWindows, getBodyOrbitPoints, getBodyPosition, getTransferState, listTransferBodies } from "../src/ksp-system.js";
 
 function assertVectorClose(actual, expected, tolerance = 1e-6) {
   assert.ok(Math.abs(actual.x - expected.x) < tolerance);
@@ -73,4 +73,32 @@ test("orbit paths preserve eccentric periapsis and apoapsis distances", () => {
 
   assert.ok(Math.abs(periapsis - 4210510627.4105854) < 1e-6);
   assert.ok(Math.abs(apoapsis - 6315765980.589414) < 1e-6);
+});
+
+test("transfer window search returns ranked candidates with required fields", () => {
+  const results = findTransferWindows("Kerbin", "Duna", 0, 60 * 60 * 24 * 80, {
+    minDuration: 60 * 60 * 24 * 20,
+    maxDuration: 60 * 60 * 24 * 150,
+    departureStep: 60 * 60 * 24 * 3,
+    durationStep: 60 * 60 * 24 * 3,
+    maxCandidates: 5,
+  });
+
+  assert.equal(results.length > 0, true);
+  assert.equal(results.length <= 5, true);
+  assert.equal(results[0].score <= results[results.length - 1].score, true);
+
+  for (const result of results) {
+    assert.equal(Number.isFinite(result.departureTime), true);
+    assert.equal(Number.isFinite(result.arrivalTime), true);
+    assert.equal(Number.isFinite(result.duration), true);
+    assert.equal(Number.isFinite(result.score), true);
+    assert.equal(result.arrivalTime > result.departureTime, true);
+    assert.equal(result.duration, result.arrivalTime - result.departureTime);
+  }
+});
+
+test("transfer window search rejects invalid ranges", () => {
+  assert.deepEqual(findTransferWindows("Kerbin", "Kerbin", 0, 1000), []);
+  assert.deepEqual(findTransferWindows("Kerbin", "Duna", 1000, 1000), []);
 });

@@ -83,6 +83,27 @@
             Czas osiągnięcia SOI celu [s]
             <input id="arrival-time" type="number" min="0" step="1000" value="5000000" />
           </label>
+          <div class="transfer-search">
+            <h3>Wyszukiwacz okien transferowych</h3>
+            <label>
+              Zakres startu od [s]
+              <input id="search-start-time" type="number" min="0" step="1000" value="0" />
+            </label>
+            <label>
+              Zakres startu do [s]
+              <input id="search-end-time" type="number" min="0" step="1000" value="20000000" />
+            </label>
+            <label>
+              Czas lotu min [s]
+              <input id="search-min-duration" type="number" min="60" step="1000" value="1000000" />
+            </label>
+            <label>
+              Czas lotu max [s]
+              <input id="search-max-duration" type="number" min="60" step="1000" value="9000000" />
+            </label>
+            <button id="search-transfer-windows" type="button">Szukaj okien transferowych</button>
+            <ul id="transfer-window-results" class="transfer-window-results"></ul>
+          </div>
           <p id="transfer-summary"></p>
           <p class="hint">Podwójne kliknięcie na planetę lub księżyc ustawia fokus kamery.</p>
         </div>
