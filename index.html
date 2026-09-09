@@ -77,11 +77,20 @@
             <label><input id="show-orbits" type="checkbox" checked /> Pokaż orbity</label>
             <label><input id="show-labels" type="checkbox" checked /> Pokaż nazwy</label>
             <label><input id="show-soi" type="checkbox" /> Pokaż SOI</label>
+            <label><input id="show-ecliptic" type="checkbox" /> Pokaż płaszczyznę ekliptyki</label>
           </div>
         </div>
 
         <div class="panel-section">
-          <p class="hint">Podwójne kliknięcie na planetę lub księżyc ustawia fokus kamery.</p>
+          <h2>Interfejs</h2>
+          <label class="range-control">
+            <span>Szerokość panelu: <output id="panel-width-value">420px</output></span>
+            <input id="panel-width" type="range" min="280" max="640" step="10" value="420" />
+          </label>
+        </div>
+
+        <div class="panel-section">
+          <p class="hint">Podwójne kliknięcie na planetę lub księżyc ustawia fokus bez zmiany zoomu i orientacji widoku.</p>
         </div>
       </aside>
 
