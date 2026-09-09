@@ -258,15 +258,15 @@ const scaleVector = (vector, scalar) => ({
 });
 
 const rotateInReferencePlane = (vector, angle) => ({
-  x: vector.x * Math.cos(angle) - vector.z * Math.sin(angle),
+  x: vector.x * Math.cos(angle) + vector.z * Math.sin(angle),
   y: vector.y,
-  z: vector.x * Math.sin(angle) + vector.z * Math.cos(angle),
+  z: -vector.x * Math.sin(angle) + vector.z * Math.cos(angle),
 });
 
 const rotateAroundXAxis = (vector, angle) => ({
   x: vector.x,
-  y: vector.y * Math.cos(angle) + vector.z * Math.sin(angle),
-  z: -vector.y * Math.sin(angle) + vector.z * Math.cos(angle),
+  y: vector.y * Math.cos(angle) - vector.z * Math.sin(angle),
+  z: vector.y * Math.sin(angle) + vector.z * Math.cos(angle),
 });
 
 function solveEccentricAnomaly(meanAnomaly, eccentricity) {
