@@ -3,18 +3,34 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   BODIES,
   DISTANCE_SCALE,
-  MIN_BODY_RADIUS_FACTOR,
-  getBody,
   getScaledPosition,
-  getScaledRadius,
   getScaledSOI,
   getTransferState,
   listTransferBodies,
 } from "./ksp-system.js";
 
+const KERBIN_DAYS_PER_YEAR = 426;
+const KERBIN_HOURS_PER_DAY = 6;
+const SECONDS_PER_DAY = KERBIN_HOURS_PER_DAY * 60 * 60;
+const SECONDS_PER_YEAR = KERBIN_DAYS_PER_YEAR * SECONDS_PER_DAY;
+const CURSOR_SIZE_PX = 16;
+const MOON_VISIBILITY_THRESHOLD = 0.75;
+
 const viewport = document.querySelector("#viewport");
 const labelsRoot = document.querySelector("#labels");
 const currentTimeInput = document.querySelector("#current-time");
+const currentYearsInput = document.querySelector("#current-years");
+const currentDaysInput = document.querySelector("#current-days");
+const currentHoursInput = document.querySelector("#current-hours");
+const currentMinutesInput = document.querySelector("#current-minutes");
+const currentSecondsInput = document.querySelector("#current-seconds");
+const timeUTModeInput = document.querySelector("#time-ut-mode");
+const timePlayToggle = document.querySelector("#time-play-toggle");
+const rateYearsInput = document.querySelector("#rate-years");
+const rateDaysInput = document.querySelector("#rate-days");
+const rateHoursInput = document.querySelector("#rate-hours");
+const rateMinutesInput = document.querySelector("#rate-minutes");
+const rateSecondsInput = document.querySelector("#rate-seconds");
 const departureTimeInput = document.querySelector("#departure-time");
 const arrivalTimeInput = document.querySelector("#arrival-time");
 const originSelect = document.querySelector("#origin");
@@ -34,10 +50,17 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 viewport.appendChild(renderer.domElement);
 
+const systemOuterRadius =
+  BODIES.filter((body) => body.parent === "Kerbol").reduce(
+    (maxValue, body) => Math.max(maxValue, body.semiMajorAxis ?? 0, (body.semiMajorAxis ?? 0) + (body.soi ?? 0)),
+    0,
+  ) * DISTANCE_SCALE;
+const maxCameraDistance = (systemOuterRadius / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) * 1.25;
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.minDistance = 3;
-controls.maxDistance = 1800;
+controls.maxDistance = maxCameraDistance;
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 const sunLight = new THREE.PointLight(0xfff4b1, 2.2, 0, 0);
@@ -64,6 +87,11 @@ const pointer = new THREE.Vector2();
 const meshEntries = [];
 const labelEntries = [];
 const bodyStates = new Map();
+
+let currentTimeSeconds = Number(currentTimeInput.value) || 0;
+let isPlaying = false;
+let isUpdatingTimeInputs = false;
+let lastFrameTime = performance.now();
 
 function createLabel(name) {
   const label = document.createElement("div");
@@ -119,10 +147,11 @@ for (const body of BODIES) {
 
   const label = createLabel(body.name);
   const orbit = createOrbit(body);
+  const isMoon = body.parent && body.parent !== "Kerbol";
 
-  bodyStates.set(body.name, { body, mesh, soiMesh, orbit, label });
+  bodyStates.set(body.name, { body, mesh, soiMesh, orbit, label, isMoon });
   meshEntries.push({ body, mesh });
-  labelEntries.push({ mesh, label });
+  labelEntries.push({ body, mesh, label, isMoon });
 }
 
 const transferCurve = new THREE.Line(
@@ -157,34 +186,214 @@ function resizeRenderer() {
   camera.updateProjectionMatrix();
 }
 
+function clampTimeValue(value) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, value);
+}
+
+function parseIntegerInput(input, fallback = 0) {
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function secondsToTimeParts(totalSeconds, asUT) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  let remaining = safeSeconds;
+
+  const yearsElapsed = Math.floor(remaining / SECONDS_PER_YEAR);
+  remaining -= yearsElapsed * SECONDS_PER_YEAR;
+
+  const daysElapsed = Math.floor(remaining / SECONDS_PER_DAY);
+  remaining -= daysElapsed * SECONDS_PER_DAY;
+
+  const hours = Math.floor(remaining / 3600);
+  remaining -= hours * 3600;
+
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining - minutes * 60;
+
+  if (asUT) {
+    return {
+      years: yearsElapsed + 1,
+      days: daysElapsed + 1,
+      hours,
+      minutes,
+      seconds,
+    };
+  }
+
+  return {
+    years: yearsElapsed,
+    days: daysElapsed,
+    hours,
+    minutes,
+    seconds,
+  };
+}
+
+function timePartsToSeconds(parts, asUT) {
+  const years = Math.max(0, Math.floor(parts.years));
+  const days = Math.max(0, Math.floor(parts.days));
+  const hours = Math.max(0, Math.floor(parts.hours));
+  const minutes = Math.max(0, Math.floor(parts.minutes));
+  const seconds = Math.max(0, Math.floor(parts.seconds));
+
+  if (asUT) {
+    const yearsElapsed = Math.max(0, years - 1);
+    const daysElapsed = Math.max(0, days - 1);
+    return (
+      yearsElapsed * SECONDS_PER_YEAR +
+      daysElapsed * SECONDS_PER_DAY +
+      hours * 3600 +
+      minutes * 60 +
+      seconds
+    );
+  }
+
+  return years * SECONDS_PER_YEAR + days * SECONDS_PER_DAY + hours * 3600 + minutes * 60 + seconds;
+}
+
+function syncTimeInputsFromSeconds() {
+  isUpdatingTimeInputs = true;
+  currentTimeInput.value = String(Math.floor(currentTimeSeconds));
+
+  const parts = secondsToTimeParts(currentTimeSeconds, timeUTModeInput.checked);
+  currentYearsInput.value = String(parts.years);
+  currentDaysInput.value = String(parts.days);
+  currentHoursInput.value = String(parts.hours);
+  currentMinutesInput.value = String(parts.minutes);
+  currentSecondsInput.value = String(parts.seconds);
+  isUpdatingTimeInputs = false;
+}
+
+function updateCurrentTimeFromSecondsInput() {
+  if (isUpdatingTimeInputs) {
+    return;
+  }
+
+  currentTimeSeconds = clampTimeValue(Number(currentTimeInput.value));
+  syncTimeInputsFromSeconds();
+}
+
+function updateCurrentTimeFromPartsInputs() {
+  if (isUpdatingTimeInputs) {
+    return;
+  }
+
+  currentTimeSeconds = timePartsToSeconds(
+    {
+      years: parseIntegerInput(currentYearsInput),
+      days: parseIntegerInput(currentDaysInput),
+      hours: parseIntegerInput(currentHoursInput),
+      minutes: parseIntegerInput(currentMinutesInput),
+      seconds: parseIntegerInput(currentSecondsInput),
+    },
+    timeUTModeInput.checked,
+  );
+
+  syncTimeInputsFromSeconds();
+}
+
 function getCurrentTime() {
-  return Number(currentTimeInput.value) || 0;
+  return currentTimeSeconds;
+}
+
+function getPlaybackRateSecondsPerSecond() {
+  return timePartsToSeconds(
+    {
+      years: parseIntegerInput(rateYearsInput),
+      days: parseIntegerInput(rateDaysInput),
+      hours: parseIntegerInput(rateHoursInput),
+      minutes: parseIntegerInput(rateMinutesInput),
+      seconds: parseIntegerInput(rateSecondsInput),
+    },
+    false,
+  );
 }
 
 function toVector(position) {
   return new THREE.Vector3(position.x, position.y, position.z);
 }
 
+function getWorldUnitsPerPixel(distance) {
+  if (renderer.domElement.clientHeight <= 0) {
+    return 0;
+  }
+
+  return (2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / renderer.domElement.clientHeight;
+}
+
+function getProjectedScreenDiameter(worldRadius, position) {
+  const distance = Math.max(camera.position.distanceTo(position), 0.0001);
+  const unitsPerPixel = getWorldUnitsPerPixel(distance);
+  if (unitsPerPixel <= 0) {
+    return 0;
+  }
+  return (worldRadius * 2) / unitsPerPixel;
+}
+
+function getMarkerDiameterPx(body) {
+  return body.name === "Kerbol" ? CURSOR_SIZE_PX * 2 : CURSOR_SIZE_PX;
+}
+
 function getDisplayRadius(body, mesh) {
-  const base = getScaledRadius(body);
-  const distance = camera.position.distanceTo(mesh.position);
-  return Math.max(base, distance * MIN_BODY_RADIUS_FACTOR);
+  const physicalRadius = body.radius * DISTANCE_SCALE;
+  const distance = Math.max(camera.position.distanceTo(mesh.position), 0.0001);
+  const unitsPerPixel = getWorldUnitsPerPixel(distance);
+  const markerRadius = unitsPerPixel > 0 ? (getMarkerDiameterPx(body) * 0.5) * unitsPerPixel : 0;
+  return Math.max(physicalRadius, markerRadius);
+}
+
+function getVisibleMoonParent() {
+  const thresholdPixels = Math.min(renderer.domElement.clientWidth, renderer.domElement.clientHeight) * MOON_VISIBILITY_THRESHOLD;
+  let visibleParent = null;
+  let bestDiameter = 0;
+
+  for (const { body, mesh } of bodyStates.values()) {
+    if (body.parent !== "Kerbol" || !body.soi) {
+      continue;
+    }
+
+    const soiDiameter = getProjectedScreenDiameter(getScaledSOI(body), mesh.position);
+    if (soiDiameter >= thresholdPixels && soiDiameter > bestDiameter) {
+      visibleParent = body.name;
+      bestDiameter = soiDiameter;
+    }
+  }
+
+  return visibleParent;
 }
 
 function updateBodies(timeSeconds) {
   for (const { body, mesh, soiMesh, orbit } of bodyStates.values()) {
     const scaledPosition = getScaledPosition(body.name, timeSeconds);
     mesh.position.set(scaledPosition.x, scaledPosition.y, scaledPosition.z);
-    mesh.scale.setScalar(getDisplayRadius(body, mesh));
 
     soiMesh.position.copy(mesh.position);
-    soiMesh.scale.setScalar(getScaledSOI(body));
-    soiMesh.visible = Boolean(body.soi) && showSOIInput.checked;
 
     if (orbit) {
       const parentPosition = getScaledPosition(body.parent, timeSeconds);
       orbit.position.set(parentPosition.x, parentPosition.y, parentPosition.z);
-      orbit.visible = showOrbitsInput.checked;
+    }
+  }
+
+  const visibleMoonParent = getVisibleMoonParent();
+
+  for (const { body, mesh, soiMesh, orbit, isMoon } of bodyStates.values()) {
+    const showMoon = !isMoon || body.parent === visibleMoonParent;
+    mesh.visible = showMoon;
+    mesh.scale.setScalar(getDisplayRadius(body, mesh));
+
+    soiMesh.scale.setScalar(getScaledSOI(body));
+    soiMesh.visible = showMoon && Boolean(body.soi) && showSOIInput.checked;
+
+    if (orbit) {
+      orbit.visible = showMoon && showOrbitsInput.checked;
     }
   }
 }
@@ -245,7 +454,7 @@ function updateTransfer() {
 
 function updateLabels() {
   for (const { mesh, label } of labelEntries) {
-    if (!showLabelsInput.checked) {
+    if (!showLabelsInput.checked || !mesh.visible) {
       label.style.display = "none";
       continue;
     }
@@ -269,7 +478,11 @@ function focusOnBody(bodyName) {
   }
 
   controls.target.copy(state.mesh.position);
-  const offset = camera.position.clone().sub(controls.target).normalize().multiplyScalar(Math.max(getDisplayRadius(state.body, state.mesh) * 8, 16));
+  const offset = camera.position
+    .clone()
+    .sub(controls.target)
+    .normalize()
+    .multiplyScalar(Math.max(getDisplayRadius(state.body, state.mesh) * 8, 16));
   camera.position.copy(state.mesh.position.clone().add(offset));
   controls.update();
 }
@@ -280,7 +493,9 @@ renderer.domElement.addEventListener("dblclick", (event) => {
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
 
-  const hits = raycaster.intersectObjects(meshEntries.map(({ mesh }) => mesh));
+  const hits = raycaster.intersectObjects(
+    meshEntries.filter(({ mesh }) => mesh.visible).map(({ mesh }) => mesh),
+  );
   if (hits.length === 0) {
     return;
   }
@@ -291,9 +506,21 @@ renderer.domElement.addEventListener("dblclick", (event) => {
   }
 });
 
-function render() {
-  const timeSeconds = getCurrentTime();
-  updateBodies(timeSeconds);
+function togglePlayback() {
+  isPlaying = !isPlaying;
+  timePlayToggle.textContent = isPlaying ? "Pause" : "Play";
+}
+
+function render(frameTime) {
+  const deltaSeconds = Math.max(0, (frameTime - lastFrameTime) / 1000);
+  lastFrameTime = frameTime;
+
+  if (isPlaying) {
+    currentTimeSeconds += deltaSeconds * getPlaybackRateSecondsPerSecond();
+    syncTimeInputsFromSeconds();
+  }
+
+  updateBodies(getCurrentTime());
   updateTransfer();
   updateLabels();
   controls.update();
@@ -301,8 +528,18 @@ function render() {
   requestAnimationFrame(render);
 }
 
+currentTimeInput.addEventListener("input", updateCurrentTimeFromSecondsInput);
+for (const input of [currentYearsInput, currentDaysInput, currentHoursInput, currentMinutesInput, currentSecondsInput]) {
+  input.addEventListener("input", updateCurrentTimeFromPartsInputs);
+}
+
+timeUTModeInput.addEventListener("change", () => {
+  syncTimeInputsFromSeconds();
+});
+
+timePlayToggle.addEventListener("click", togglePlayback);
+
 for (const element of [
-  currentTimeInput,
   departureTimeInput,
   arrivalTimeInput,
   originSelect,
@@ -320,7 +557,8 @@ for (const element of [
 }
 
 populateSelectors();
+syncTimeInputsFromSeconds();
 resizeRenderer();
 window.addEventListener("resize", resizeRenderer);
 focusOnBody("Kerbin");
-render();
+requestAnimationFrame(render);

@@ -36,14 +36,46 @@ body {
   font-size: 0.95rem;
 }
 
+.time-mode {
+  flex-direction: row !important;
+  align-items: center;
+}
+
 .panel input,
-.panel select {
+.panel select,
+.panel button {
   width: 100%;
   padding: 0.6rem 0.7rem;
   border: 1px solid rgba(148, 163, 184, 0.3);
   border-radius: 0.5rem;
   background: #0f172a;
   color: inherit;
+}
+
+.panel button {
+  cursor: pointer;
+}
+
+.time-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.speed-grid {
+  grid-template-columns: 1fr;
+}
+
+.playback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.playback p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #cbd5e1;
 }
 
 .toggles {
