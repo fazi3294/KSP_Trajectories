@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { findTransferWindows, getBodyOrbitPoints, getBodyPosition, getTransferState, listTransferBodies } from "../src/ksp-system.js";
+import {
+  findTransferWindows,
+  getBodyOrbitPoints,
+  getBodyPosition,
+  getTransferPlan,
+  getTransferSearchContext,
+  getTransferState,
+  listTransferBodies,
+} from "../src/ksp-system.js";
 
 function assertVectorClose(actual, expected, tolerance = 1e-6) {
   assert.ok(Math.abs(actual.x - expected.x) < tolerance);
@@ -76,29 +84,55 @@ test("orbit paths preserve eccentric periapsis and apoapsis distances", () => {
 });
 
 test("transfer window search returns ranked candidates with required fields", () => {
-  const results = findTransferWindows("Kerbin", "Duna", 0, 60 * 60 * 24 * 80, {
-    minDuration: 60 * 60 * 24 * 20,
-    maxDuration: 60 * 60 * 24 * 150,
-    departureStep: 60 * 60 * 24 * 3,
-    durationStep: 60 * 60 * 24 * 3,
+  const results = findTransferWindows("Kerbin", "Duna", 0, 60 * 60 * 24 * 240, {
+    minDuration: 60 * 60 * 24 * 30,
+    maxDuration: 60 * 60 * 24 * 260,
+    departureStep: 60 * 60 * 24 * 5,
+    durationStep: 60 * 60 * 24 * 5,
     maxCandidates: 5,
   });
 
   assert.equal(results.length > 0, true);
   assert.equal(results.length <= 5, true);
-  assert.equal(results[0].score <= results[results.length - 1].score, true);
+  assert.equal(results[0].deltaV <= results[results.length - 1].deltaV, true);
 
   for (const result of results) {
     assert.equal(Number.isFinite(result.departureTime), true);
     assert.equal(Number.isFinite(result.arrivalTime), true);
     assert.equal(Number.isFinite(result.duration), true);
     assert.equal(Number.isFinite(result.score), true);
+    assert.equal(Number.isFinite(result.deltaV), true);
+    assert.equal(Number.isFinite(result.departureDeltaV), true);
+    assert.equal(Number.isFinite(result.arrivalDeltaV), true);
+    assert.equal(Number.isFinite(result.phaseAngleDeg), true);
+    assert.equal(Number.isFinite(result.transferAngleDeg), true);
     assert.equal(result.arrivalTime > result.departureTime, true);
     assert.equal(result.duration, result.arrivalTime - result.departureTime);
+    assert.equal(result.score, result.deltaV);
   }
 });
 
 test("transfer window search rejects invalid ranges", () => {
   assert.deepEqual(findTransferWindows("Kerbin", "Kerbin", 0, 1000), []);
   assert.deepEqual(findTransferWindows("Kerbin", "Duna", 1000, 1000), []);
+});
+
+test("Lambert transfer plan exposes delta-v details for sibling bodies", () => {
+  const plan = getTransferPlan("Kerbin", "Duna", 0, 60 * 60 * 24 * 120);
+
+  assert.equal(plan.valid, true);
+  assert.equal(plan.centerName, "Kerbol");
+  assert.equal(plan.deltaV > 0, true);
+  assert.equal(plan.departureDeltaV > 0, true);
+  assert.equal(plan.arrivalDeltaV > 0, true);
+  assert.equal(plan.score, plan.deltaV);
+  assert.equal(Math.abs(plan.deltaV - (plan.departureDeltaV + plan.arrivalDeltaV)) < 0.01, true);
+  assert.equal(plan.phaseAngleDeg >= 0 && plan.phaseAngleDeg <= 360, true);
+});
+
+test("Lambert transfer search context rejects bodies without a shared parent", () => {
+  const context = getTransferSearchContext("Kerbin", "Mun");
+
+  assert.equal(context.valid, false);
+  assert.match(context.reason, /to samo ciało nadrzędne/i);
 });

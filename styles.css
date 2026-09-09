@@ -189,10 +189,21 @@ body {
 }
 
 .transfer-window-results button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   text-align: left;
   font-size: 0.8rem;
   line-height: 1.35;
   padding: 0.45rem 0.55rem;
+}
+
+.transfer-window-title {
+  font-weight: 700;
+}
+
+.transfer-window-meta {
+  color: #cbd5e1;
 }
 
 @media (max-width: 960px) {

@@ -3,6 +3,8 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import {
   BODIES,
   DISTANCE_SCALE,
+  getTransferPlan,
+  getTransferSearchContext,
   getBodyOrbitPoints,
   findTransferWindows,
   getScaledPosition,
@@ -107,6 +109,7 @@ let isUpdatingTimeInputs = false;
 let lastFrameTime = performance.now();
 let useCompactTimeControls = false;
 let useCompactRateControls = false;
+let currentTransferPlan = null;
 
 function createLabel(name) {
   const label = document.createElement("div");
@@ -327,6 +330,14 @@ function formatSecondsCompact(totalSeconds) {
   return `${parts.years}Y ${parts.days}D ${parts.hours}H ${parts.minutes}m ${parts.seconds}s`;
 }
 
+function formatVelocity(value) {
+  return `${value.toFixed(0)} m/s`;
+}
+
+function formatAngle(value) {
+  return `${value.toFixed(1)}°`;
+}
+
 function toVector(position) {
   return new THREE.Vector3(position.x, position.y, position.z);
 }
@@ -458,18 +469,38 @@ function updateTransfer() {
   shipMarker.position.copy(curve.getPoint(state.progress));
   shipMarker.visible = state.shipVisible;
 
-  transferSummary.textContent = `Trajektoria: ${originSelect.value} → ${destinationSelect.value}, postęp lotu: ${Math.round(
-    state.progress * 100,
-  )}%`;
+  const summaryParts = [
+    `Trajektoria: ${originSelect.value} → ${destinationSelect.value}`,
+    `postęp lotu: ${Math.round(state.progress * 100)}%`,
+  ];
+  if (currentTransferPlan?.valid) {
+    summaryParts.push(`lot: ${formatSecondsCompact(currentTransferPlan.duration)}`);
+    summaryParts.push(`Δv: ${formatVelocity(currentTransferPlan.deltaV)}`);
+    summaryParts.push(`faza: ${formatAngle(currentTransferPlan.phaseAngleDeg)}`);
+  } else if (currentTransferPlan?.reason) {
+    summaryParts.push(currentTransferPlan.reason);
+  }
+
+  transferSummary.textContent = summaryParts.join(" | ");
+}
+
+function updateTransferPlanDetails() {
+  currentTransferPlan = getTransferPlan(
+    originSelect.value,
+    destinationSelect.value,
+    Number(departureTimeInput.value),
+    Number(arrivalTimeInput.value),
+  );
 }
 
 function selectTransferWindow(result) {
   departureTimeInput.value = String(Math.floor(result.departureTime));
   arrivalTimeInput.value = String(Math.floor(result.arrivalTime));
+  updateTransferPlanDetails();
   updateTransfer();
 }
 
-function renderTransferWindowResults(results) {
+function renderTransferWindowResults(results, emptyMessage = "Brak wyników dla wybranego zakresu.") {
   if (!transferWindowResults) {
     return;
   }
@@ -477,7 +508,7 @@ function renderTransferWindowResults(results) {
   transferWindowResults.replaceChildren();
   if (results.length === 0) {
     const empty = document.createElement("li");
-    empty.textContent = "Brak wyników dla wybranego zakresu.";
+    empty.textContent = emptyMessage;
     transferWindowResults.appendChild(empty);
     return;
   }
@@ -486,9 +517,15 @@ function renderTransferWindowResults(results) {
     const item = document.createElement("li");
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = `Start: ${Math.floor(result.departureTime)} s | Cel: ${Math.floor(
-      result.arrivalTime,
-    )} s | Lot: ${formatSecondsCompact(result.duration)} | Score: ${result.score.toFixed(2)}`;
+    const heading = document.createElement("span");
+    heading.className = "transfer-window-title";
+    heading.textContent = `Start: ${Math.floor(result.departureTime)} s → Przylot: ${Math.floor(result.arrivalTime)} s`;
+    const details = document.createElement("span");
+    details.className = "transfer-window-meta";
+    details.textContent = `Lot: ${formatSecondsCompact(result.duration)} | Δv: ${formatVelocity(
+      result.deltaV,
+    )} | Faza: ${formatAngle(result.phaseAngleDeg)}`;
+    button.append(heading, details);
     button.addEventListener("click", () => {
       selectTransferWindow(result);
     });
@@ -497,7 +534,20 @@ function renderTransferWindowResults(results) {
   }
 }
 
+function updateTransferSearchAvailability() {
+  const context = getTransferSearchContext(originSelect.value, destinationSelect.value);
+  if (searchTransferWindowsButton) {
+    searchTransferWindowsButton.title = context.valid ? "" : context.reason;
+  }
+}
+
 function searchTransferWindows() {
+  const context = getTransferSearchContext(originSelect.value, destinationSelect.value);
+  if (!context.valid) {
+    renderTransferWindowResults([], context.reason);
+    return;
+  }
+
   const searchStartTime = Number(searchStartTimeInput?.value);
   const searchEndTime = Number(searchEndTimeInput?.value);
   const minDuration = Number(searchMinDurationInput?.value);
@@ -506,8 +556,6 @@ function searchTransferWindows() {
   const results = findTransferWindows(originSelect.value, destinationSelect.value, searchStartTime, searchEndTime, {
     minDuration,
     maxDuration,
-    departureStep: 60 * 60 * 12,
-    durationStep: 60 * 60 * 12,
     maxCandidates: 10,
   });
 
@@ -641,9 +689,13 @@ for (const element of [
   showSOIInput,
 ]) {
   element.addEventListener("input", () => {
+    updateTransferPlanDetails();
+    updateTransferSearchAvailability();
     updateTransfer();
   });
   element.addEventListener("change", () => {
+    updateTransferPlanDetails();
+    updateTransferSearchAvailability();
     updateTransfer();
   });
 }
@@ -652,9 +704,17 @@ if (searchTransferWindowsButton) {
   searchTransferWindowsButton.addEventListener("click", searchTransferWindows);
 }
 
+for (const element of [originSelect, destinationSelect]) {
+  element.addEventListener("change", () => {
+    transferWindowResults?.replaceChildren();
+  });
+}
+
 populateSelectors();
 syncTimeInputsFromSeconds();
 updateTimeModeUI();
+updateTransferPlanDetails();
+updateTransferSearchAvailability();
 resizeRenderer();
 window.addEventListener("resize", resizeRenderer);
 focusOnBody("Kerbin");
