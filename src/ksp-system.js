@@ -299,7 +299,9 @@ function transformOrbitalPlanePosition(body, position) {
 function getBodyPositionInParentFrame(body, timeSeconds) {
   const eccentricity = body.eccentricity ?? 0;
   const meanMotion = TAU / body.orbitalPeriod;
-  const meanAnomaly = normalizeAngle((body.meanAnomalyAtEpochRad ?? 0) + timeSeconds * meanMotion);
+  // The rendered reference plane is viewed from +Z, so increasing the
+  // orbital angle must be propagated backwards to appear counterclockwise.
+  const meanAnomaly = normalizeAngle((body.meanAnomalyAtEpochRad ?? 0) - timeSeconds * meanMotion);
   const eccentricAnomaly = solveEccentricAnomaly(meanAnomaly, eccentricity);
   const semiMinorAxis = body.semiMajorAxis * Math.sqrt(1 - eccentricity ** 2);
 
@@ -665,12 +667,16 @@ function solveLambertTransfer(startPosition, endPosition, flightTime, gravitatio
 }
 
 function getRoundedTransferDetails(details) {
+  const departureDeltaV = Number(details.departureDeltaV.toFixed(2));
+  const arrivalDeltaV = Number(details.arrivalDeltaV.toFixed(2));
+  const deltaV = Number((departureDeltaV + arrivalDeltaV).toFixed(2));
+
   return {
     ...details,
-    score: Number(details.score.toFixed(2)),
-    deltaV: Number(details.deltaV.toFixed(2)),
-    departureDeltaV: Number(details.departureDeltaV.toFixed(2)),
-    arrivalDeltaV: Number(details.arrivalDeltaV.toFixed(2)),
+    score: deltaV,
+    deltaV,
+    departureDeltaV,
+    arrivalDeltaV,
     phaseAngleDeg: Number(details.phaseAngleDeg.toFixed(2)),
     transferAngleDeg: Number(details.transferAngleDeg.toFixed(2)),
   };
