@@ -37,3 +37,4 @@ npm test
 - **Toggles** – pokaż/ukryj orbity, nazwy ciał niebieskich, sfery SOI
 - **Sterowanie czasem** – sekundy oraz pola rok/dzień/godzina/minuta/sekunda, przełącznik czasu gry/UT i odtwarzanie czasu (Play/Pause) z regulacją prędkości
 - **Wizualizacja transferu** – wprowadź start, cel i czasy, aby zobaczyć trajektorię transferu ze statkiem
+- **Wyszukiwacz okien transferowych** – przeszukuje zakres czasu i proponuje najlepsze okna transferowe z oceną jakości
