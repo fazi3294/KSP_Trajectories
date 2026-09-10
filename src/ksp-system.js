@@ -926,14 +926,6 @@ export function getTransferTrajectory(
       scaleVector(originRadial, Math.sin(escapeAngle)),
     ),
   );
-  const startPosition = addVectors(originState.position, scaleVector(originRadial, departureRadius));
-  const startVelocity = addVectors(
-    originState.velocity,
-    addVectors(
-      scaleVector(originPrograde, circularSpeed),
-      scaleVector(escapeDirection, Math.max(0, Number(options.departureDeltaV) || 0)),
-    ),
-  );
   const arrivalState = getRelativeBodyState(
     destinationName,
     context.centerName,
@@ -943,11 +935,58 @@ export function getTransferTrajectory(
   const points = [];
   const times = [];
   const maneuverPositions = [];
-  let state = {
-    position: startPosition,
-    velocity: startVelocity,
+  const localMu = BODY_MU_BY_NAME.get(originName);
+  const localStartState = {
+    position: scaleVector(originRadial, departureRadius),
+    velocity: addVectors(
+      scaleVector(originPrograde, circularSpeed),
+      scaleVector(escapeDirection, Math.max(0, Number(options.departureDeltaV) || 0)),
+    ),
   };
-  let segmentStartTime = departureTime;
+  let localDuration = 0;
+  let localExitState = localStartState;
+
+  if (localMu && originBody.soi) {
+    const localStep = 60;
+    const maxLocalDuration = Math.min(arrivalTime - departureTime, 60 * 60 * 24 * 3);
+    for (let elapsed = localStep; elapsed <= maxLocalDuration; elapsed += localStep) {
+      const candidate = propagateTwoBody(
+        localStartState.position,
+        localStartState.velocity,
+        elapsed,
+        localMu,
+      );
+      if (magnitude(candidate.position) >= originBody.soi) {
+        localDuration = elapsed;
+        localExitState = candidate;
+        break;
+      }
+    }
+  }
+
+  for (let index = 0; index <= samplesPerSegment; index += 1) {
+    const progress = index / samplesPerSegment;
+    const offsetTime = localDuration * progress;
+    const localState = propagateTwoBody(
+      localStartState.position,
+      localStartState.velocity,
+      offsetTime,
+      localMu || trajectoryMu,
+    );
+    const originPosition = getBodyPosition(originName, departureTime + offsetTime);
+    points.push(
+      scaleVector(addVectors(originPosition, localState.position), DISTANCE_SCALE),
+    );
+    times.push(departureTime + offsetTime);
+  }
+
+  const solarStartPosition = addVectors(originState.position, localExitState.position);
+  const solarStartVelocity = addVectors(originState.velocity, localExitState.velocity);
+  let state = {
+    position: solarStartPosition,
+    velocity: solarStartVelocity,
+  };
+  let segmentStartTime = departureTime + localDuration;
 
   const appendSegment = (segmentEndTime, isFinalSegment = false) => {
     const duration = segmentEndTime - segmentStartTime;
@@ -965,10 +1004,21 @@ export function getTransferTrajectory(
       if (isFinalSegment && progress > 0.65) {
         const approachProgress = (progress - 0.65) / 0.35;
         const blend = approachProgress * approachProgress * (3 - 2 * approachProgress);
-        position = addVectors(
-          scaleVector(position, 1 - blend),
-          scaleVector(arrivalState.position, blend),
+        const currentRadius = Math.max(1, Math.hypot(position.x, position.z));
+        const targetRadius = Math.max(1, Math.hypot(arrivalState.position.x, arrivalState.position.z));
+        const currentAngle = Math.atan2(position.z, position.x);
+        const targetAngle = Math.atan2(arrivalState.position.z, arrivalState.position.x);
+        const angleDelta = Math.atan2(
+          Math.sin(targetAngle - currentAngle),
+          Math.cos(targetAngle - currentAngle),
         );
+        const angle = currentAngle + angleDelta * blend;
+        const radius = currentRadius + (targetRadius - currentRadius) * blend;
+        position = {
+          x: radius * Math.cos(angle),
+          y: position.y + (arrivalState.position.y - position.y) * blend,
+          z: radius * Math.sin(angle),
+        };
       }
       const parentPosition = getBodyPosition(context.centerName, segmentStartTime + offsetTime);
       points.push(
@@ -1023,7 +1073,7 @@ export function getTransferTrajectory(
     points,
     times,
     maneuverPositions,
-    departureVelocity: startVelocity,
+    departureVelocity: solarStartVelocity,
   };
 }
 
