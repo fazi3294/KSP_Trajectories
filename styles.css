@@ -243,6 +243,12 @@ body {
   gap: 0.35rem;
 }
 
+.transfer-angle-hint,
+#transfer-auto-result {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .transfer-time-parts {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
