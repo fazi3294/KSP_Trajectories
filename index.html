@@ -133,35 +133,24 @@
             </div>
           </div>
           <label>
-            Wysokość orbity startowej [m] (opcjonalnie)
-            <input id="transfer-departure-orbit-height" type="number" min="0" step="any" placeholder="np. 100000" />
+            Wysokość orbity startowej [m]
+            <input id="transfer-departure-orbit-height" type="number" min="1" step="any" value="100000" required />
           </label>
           <label>
             Δv ucieczki [m/s]
             <input id="transfer-departure-delta-v" type="number" min="0" step="any" value="950" required />
           </label>
           <label>
-            Kąt ucieczki [°]
+            Pozycja odpalenia względem prograde [°]
             <input id="transfer-departure-escape-angle" type="number" step="any" value="0" required />
           </label>
-          <label>
-            Ciało docelowe
-            <select id="transfer-destination"></select>
-          </label>
-          <div class="transfer-time-control">
-            <span>Czas dotarcia</span>
-            <div class="transfer-time-parts">
-              <label>Y <input id="transfer-arrival-years" type="number" min="1" step="1" value="1" /></label>
-              <label>D <input id="transfer-arrival-days" type="number" min="1" step="1" value="101" /></label>
-              <label>H <input id="transfer-arrival-hours" type="number" min="0" step="1" value="0" /></label>
-              <label>m <input id="transfer-arrival-minutes" type="number" min="0" step="1" value="0" /></label>
-              <label>s <input id="transfer-arrival-seconds" type="number" min="0" step="1" value="0" /></label>
-            </div>
-          </div>
-          <label>
-            Wysokość orbity docelowej [m] (opcjonalnie, przechwycenie)
-            <input id="transfer-arrival-orbit-height" type="number" min="0" step="any" placeholder="pozostaw puste bez przechwycenia" />
-          </label>
+          <p class="hint transfer-angle-hint">
+            0° oznacza pozycję w kierunku prograde planety, -90° pozycję za planetą,
+            a dodatnie i ujemne wartości są dozwolone.
+          </p>
+          <p id="transfer-auto-result" class="hint">
+            Cel i czas najbliższego zbliżenia zostaną wyznaczone z propagacji trajektorii.
+          </p>
         </div>
 
         <div class="dialog-section">
@@ -169,7 +158,7 @@
             <h3>Manewry pośrednie</h3>
             <button id="transfer-add-maneuver" type="button">Dodaj zmianę</button>
           </div>
-          <p class="hint">Podawaj daty kalendarza KSP: rok i dzień zaczynają się od 1. Położenie zmiany wynika wyłącznie z jej czasu. Składowe Δv są opcjonalne i przy asyście grawitacyjnej mogą pozostać równe zero.</p>
+          <p class="hint">Podawaj daty kalendarza KSP: rok i dzień zaczynają się od 1. Zmiany są nakładane na fizycznie propagowaną trajektorię; ich czas musi być późniejszy od startu. Składowe Δv są opcjonalne i przy asyście grawitacyjnej mogą pozostać równe zero.</p>
           <div id="transfer-maneuvers" class="maneuver-list"></div>
         </div>
 

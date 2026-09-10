@@ -904,6 +904,275 @@ function addManeuverVelocity(state, maneuver) {
   };
 }
 
+function createEscapeStartState(originName, departureTime, options = {}) {
+  const originBody = getBody(originName);
+  const centerName = originBody?.parent;
+  const trajectoryMu = centerName ? BODY_MU_BY_PARENT.get(centerName) : null;
+  if (!originBody || !centerName || !Number.isFinite(trajectoryMu) || trajectoryMu <= 0) {
+    return {
+      valid: false,
+      reason: "Brak danych grawitacyjnych dla wybranego ciała startowego.",
+    };
+  }
+
+  const originState = getRelativeBodyState(
+    originName,
+    centerName,
+    departureTime,
+    { positionCache: new Map(), velocityCache: new Map() },
+  );
+  const originRadial = normalize(originState.position);
+  const originNormal = normalize(cross(originState.position, originState.velocity));
+  const originPrograde = normalize(cross(originNormal, originRadial));
+  const departureOrbitHeight = Math.max(0, Number(options.departureOrbitHeight) || 0);
+  const departureRadius = originBody.radius + departureOrbitHeight;
+  const bodyMu = BODY_MU_BY_NAME.get(originName);
+  if (!bodyMu || departureRadius <= originBody.radius) {
+    return {
+      valid: false,
+      reason: "Podaj wysokość orbity startowej większą od zera.",
+    };
+  }
+
+  const escapeAngle = degreesToRadians(Number(options.departureEscapeAngle) || 0);
+  const parkingRadial = normalize(
+    addVectors(
+      scaleVector(originPrograde, Math.cos(escapeAngle)),
+      scaleVector(originRadial, Math.sin(escapeAngle)),
+    ),
+  );
+  const parkingPrograde = normalize(
+    addVectors(
+      scaleVector(originRadial, Math.cos(escapeAngle)),
+      scaleVector(originPrograde, -Math.sin(escapeAngle)),
+    ),
+  );
+  const circularSpeed = Math.sqrt(bodyMu / departureRadius);
+  const localStartState = {
+    position: scaleVector(parkingRadial, departureRadius),
+    velocity: addVectors(
+      scaleVector(parkingPrograde, circularSpeed),
+      scaleVector(parkingPrograde, Math.max(0, Number(options.departureDeltaV) || 0)),
+    ),
+  };
+
+  let localDuration = 0;
+  let localExitState = localStartState;
+  let escaped = false;
+  if (originBody.soi) {
+    const localStep = 60;
+    const maxLocalDuration = 60 * 60 * 24 * 3;
+    for (let elapsed = localStep; elapsed <= maxLocalDuration; elapsed += localStep) {
+      const candidate = propagateNumerically(
+        localStartState.position,
+        localStartState.velocity,
+        elapsed,
+        bodyMu,
+      );
+      if (magnitude(candidate.position) >= originBody.soi) {
+        localDuration = elapsed;
+        localExitState = candidate;
+        escaped = true;
+        break;
+      }
+    }
+  } else {
+    escaped = true;
+  }
+
+  if (!escaped) {
+    return {
+      valid: false,
+      reason: "Podane Δv nie opuszcza SOI ciała startowego w ciągu trzech dni.",
+    };
+  }
+
+  return {
+    valid: true,
+    centerName,
+    trajectoryMu,
+    originBody,
+    originState,
+    localStartState,
+    localDuration,
+    localExitState,
+    solarStartTime: departureTime + localDuration,
+    solarStartState: {
+      position: addVectors(originState.position, localExitState.position),
+      velocity: addVectors(originState.velocity, localExitState.velocity),
+    },
+  };
+}
+
+function createTwoBodyPropagator(state, gravitationalParameter) {
+  const keplerOrbit = createKeplerOrbit(
+    state.position,
+    state.velocity,
+    gravitationalParameter,
+  );
+  return (offsetTime) =>
+    keplerOrbit
+      ? propagateKeplerOrbit(keplerOrbit, offsetTime, gravitationalParameter)
+      : propagateNumerically(
+          state.position,
+          state.velocity,
+          offsetTime,
+          gravitationalParameter,
+        );
+}
+
+export function getEscapeTrajectory(originName, departureTime, options = {}) {
+  if (!Number.isFinite(departureTime)) {
+    return { valid: false, reason: "Czas startu musi być poprawną liczbą." };
+  }
+
+  const start = createEscapeStartState(originName, departureTime, options);
+  if (!start.valid) {
+    return start;
+  }
+
+  const horizonSeconds = Math.max(
+    60 * 60 * 24,
+    Number(options.horizonSeconds) || 5 * 426 * 21600,
+  );
+  const searchStep = Math.max(60 * 60, Number(options.searchStepSeconds) || 6 * 21600);
+  const candidates = BODIES.filter(
+    (body) => body.parent === start.centerName && body.name !== originName && body.soi,
+  );
+  if (candidates.length === 0) {
+    return { valid: false, reason: "Brak ciał docelowych w tym układzie." };
+  }
+
+  const maneuvers = [...(options.maneuvers ?? [])]
+    .filter((maneuver) => Number(maneuver.time) > start.solarStartTime)
+    .sort((left, right) => left.time - right.time);
+  const samples = [{ time: start.solarStartTime, state: start.solarStartState }];
+  const maneuverPositions = [];
+  let state = start.solarStartState;
+  let segmentStartTime = start.solarStartTime;
+  let propagateSegment = createTwoBodyPropagator(state, start.trajectoryMu);
+  let maneuverIndex = 0;
+  let bestApproach = null;
+  let firstEncounter = null;
+
+  for (
+    let time = start.solarStartTime + searchStep;
+    time <= start.solarStartTime + horizonSeconds;
+    time += searchStep
+  ) {
+    while (maneuverIndex < maneuvers.length && maneuvers[maneuverIndex].time <= time) {
+      const maneuver = maneuvers[maneuverIndex];
+      const maneuverState = propagateSegment(maneuver.time - segmentStartTime);
+      maneuverPositions.push({
+        time: maneuver.time,
+        state: maneuverState,
+      });
+      state = addManeuverVelocity(maneuverState, maneuver);
+      segmentStartTime = maneuver.time;
+      propagateSegment = createTwoBodyPropagator(state, start.trajectoryMu);
+      maneuverIndex += 1;
+    }
+
+    state = propagateSegment(time - segmentStartTime);
+    samples.push({ time, state });
+    for (const candidate of candidates) {
+      const candidateState = getRelativeBodyState(
+        candidate.name,
+        start.centerName,
+        time,
+        { positionCache: new Map(), velocityCache: new Map() },
+      );
+      const distance = magnitude(subtractVectors(state.position, candidateState.position));
+      const normalizedDistance = distance / candidate.soi;
+      if (normalizedDistance <= 1 && !firstEncounter) {
+        firstEncounter = {
+          body: candidate,
+          time,
+          distance,
+          normalizedDistance,
+        };
+      }
+      if (!bestApproach || distance < bestApproach.distance) {
+        bestApproach = {
+          body: candidate,
+          time,
+          distance,
+          normalizedDistance,
+        };
+      }
+    }
+  }
+
+  const selectedApproach = firstEncounter ?? bestApproach;
+  if (!selectedApproach) {
+    return { valid: false, reason: "Nie udało się wyznaczyć trajektorii ucieczki." };
+  }
+
+  const points = [];
+  const times = [];
+  const samplesPerLocalSegment = Math.max(16, Math.floor(options.samplesPerSegment ?? 72));
+  for (let index = 0; index <= samplesPerLocalSegment; index += 1) {
+    const progress = index / samplesPerLocalSegment;
+    const offsetTime = start.localDuration * progress;
+    const localState = propagateNumerically(
+      start.localStartState.position,
+      start.localStartState.velocity,
+      offsetTime,
+      BODY_MU_BY_NAME.get(originName),
+    );
+    points.push(
+      scaleVector(
+        addVectors(
+          getBodyPosition(originName, departureTime + offsetTime),
+          localState.position,
+        ),
+        DISTANCE_SCALE,
+      ),
+    );
+    times.push(departureTime + offsetTime);
+  }
+
+  for (const sample of samples) {
+    if (sample.time > selectedApproach.time) {
+      break;
+    }
+    if (sample.time === start.solarStartTime && points.length > 0) {
+      continue;
+    }
+    points.push(
+      scaleVector(
+        addVectors(getBodyPosition(start.centerName, sample.time), sample.state.position),
+        DISTANCE_SCALE,
+      ),
+    );
+    times.push(sample.time);
+  }
+
+  for (const maneuver of maneuverPositions) {
+    if (maneuver.time <= selectedApproach.time) {
+      const position = addVectors(
+        getBodyPosition(start.centerName, maneuver.time),
+        maneuver.state.position,
+      );
+      maneuver.position = scaleVector(position, DISTANCE_SCALE);
+    }
+  }
+
+  return {
+    valid: true,
+    points,
+    times,
+    maneuverPositions: maneuverPositions
+      .filter((maneuver) => maneuver.position)
+      .map((maneuver) => maneuver.position),
+    destinationName: selectedApproach.body.name,
+    arrivalTime: selectedApproach.time,
+    closestApproachDistance: selectedApproach.distance,
+    encountered: selectedApproach.normalizedDistance <= 1,
+    departureVelocity: start.solarStartState.velocity,
+  };
+}
+
 function createKeplerOrbit(position, velocity, gravitationalParameter) {
   const radius = magnitude(position);
   const speedSquared = dot(velocity, velocity);
@@ -1114,10 +1383,19 @@ export function getTransferTrajectory(
   const bodyMu = BODY_MU_BY_NAME.get(originName);
   const circularSpeed = bodyMu ? Math.sqrt(bodyMu / departureRadius) : 0;
   const escapeAngle = degreesToRadians(Number(options.departureEscapeAngle) || 0);
-  const escapeDirection = normalize(
+  // The ejection angle identifies the burn position around the origin body:
+  // 0° is in the body's prograde direction, positive angles turn toward its
+  // outward radial direction, and negative angles turn behind the body.
+  const parkingRadial = normalize(
     addVectors(
       scaleVector(originPrograde, Math.cos(escapeAngle)),
       scaleVector(originRadial, Math.sin(escapeAngle)),
+    ),
+  );
+  const parkingPrograde = normalize(
+    addVectors(
+      scaleVector(originRadial, Math.cos(escapeAngle)),
+      scaleVector(originPrograde, -Math.sin(escapeAngle)),
     ),
   );
   const arrivalState = getRelativeBodyState(
@@ -1131,10 +1409,10 @@ export function getTransferTrajectory(
   const maneuverPositions = [];
   const localMu = BODY_MU_BY_NAME.get(originName);
   const localStartState = {
-    position: scaleVector(originRadial, departureRadius),
+    position: scaleVector(parkingRadial, departureRadius),
     velocity: addVectors(
-      scaleVector(originPrograde, circularSpeed),
-      scaleVector(escapeDirection, Math.max(0, Number(options.departureDeltaV) || 0)),
+      scaleVector(parkingPrograde, circularSpeed),
+      scaleVector(parkingPrograde, Math.max(0, Number(options.departureDeltaV) || 0)),
     ),
   };
   let localDuration = 0;

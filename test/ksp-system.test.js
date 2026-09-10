@@ -5,6 +5,7 @@ import {
   findTransferWindows,
   getBodyOrbitPoints,
   getBodyPosition,
+  getEscapeTrajectory,
   getTransferPlan,
   getTransferSearchContext,
   getTransferState,
@@ -188,4 +189,31 @@ test("input-driven transfer trajectory uses start escape data and reaches target
     Math.max(...trajectory.points.map((point) => Math.hypot(point.x, point.y, point.z))) < 1000,
     true,
   );
+});
+
+test("escape trajectory derives closest body and time from signed ejection angle", () => {
+  const trajectory = getEscapeTrajectory("Kerbin", 0, {
+    departureOrbitHeight: 100000,
+    departureDeltaV: 950,
+    departureEscapeAngle: -115.8,
+    horizonSeconds: 2 * 426 * 21600,
+  });
+  const mirroredTrajectory = getEscapeTrajectory("Kerbin", 0, {
+    departureOrbitHeight: 100000,
+    departureDeltaV: 950,
+    departureEscapeAngle: 115.8,
+    horizonSeconds: 2 * 426 * 21600,
+  });
+
+  assert.equal(trajectory.valid, true);
+  assert.equal(typeof trajectory.destinationName, "string");
+  assert.equal(trajectory.arrivalTime > 0, true);
+  assert.equal(trajectory.encountered, false);
+  assert.equal(
+    trajectory.points.every((point) =>
+      [point.x, point.y, point.z].every((coordinate) => Number.isFinite(coordinate)),
+    ),
+    true,
+  );
+  assert.notDeepEqual(trajectory.points[20], mirroredTrajectory.points[20]);
 });
