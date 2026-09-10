@@ -78,7 +78,14 @@
             <label><input id="show-labels" type="checkbox" checked /> Pokaż nazwy</label>
             <label><input id="show-soi" type="checkbox" /> Pokaż SOI</label>
             <label><input id="show-ecliptic" type="checkbox" /> Pokaż płaszczyznę ekliptyki</label>
+            <label><input id="show-transfer" type="checkbox" checked /> Pokaż transfer</label>
           </div>
+        </div>
+
+        <div class="panel-section">
+          <h2>Transfer</h2>
+          <button id="transfer-open" type="button">Nowy transfer</button>
+          <p id="transfer-summary" class="hint">Brak zdefiniowanego transferu.</p>
         </div>
 
         <div class="panel-section">
@@ -99,6 +106,49 @@
         <div id="labels"></div>
       </main>
     </div>
+
+    <dialog id="transfer-dialog" class="transfer-dialog">
+      <form id="transfer-form" method="dialog">
+        <div class="dialog-header">
+          <h2>Definicja transferu</h2>
+          <button id="transfer-close" class="dialog-close" type="button" aria-label="Zamknij">×</button>
+        </div>
+
+        <div class="transfer-endpoints">
+          <label>
+            Ciało startowe
+            <select id="transfer-origin"></select>
+          </label>
+          <label>
+            Czas startu [s]
+            <input id="transfer-departure-time" type="number" min="0" step="1" value="0" />
+          </label>
+          <label>
+            Ciało docelowe
+            <select id="transfer-destination"></select>
+          </label>
+          <label>
+            Czas dotarcia [s]
+            <input id="transfer-arrival-time" type="number" min="0" step="1" value="10000000" />
+          </label>
+        </div>
+
+        <div class="dialog-section">
+          <div class="dialog-section-header">
+            <h3>Manewry pośrednie</h3>
+            <button id="transfer-add-maneuver" type="button">Dodaj zmianę</button>
+          </div>
+          <p class="hint">Czas każdego manewru musi leżeć pomiędzy startem i dotarciem.</p>
+          <div id="transfer-maneuvers" class="maneuver-list"></div>
+        </div>
+
+        <p id="transfer-form-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="transfer-cancel" type="button">Anuluj</button>
+          <button id="transfer-save" type="submit">Pokaż transfer</button>
+        </div>
+      </form>
+    </dialog>
 
     <script type="module" src="./src/app.js"></script>
   </body>

@@ -41,8 +41,22 @@ const showOrbitsInput = document.querySelector("#show-orbits");
 const showLabelsInput = document.querySelector("#show-labels");
 const showSOIInput = document.querySelector("#show-soi");
 const showEclipticInput = document.querySelector("#show-ecliptic");
+const showTransferInput = document.querySelector("#show-transfer");
 const panelWidthInput = document.querySelector("#panel-width");
 const panelWidthValue = document.querySelector("#panel-width-value");
+const transferOpenButton = document.querySelector("#transfer-open");
+const transferDialog = document.querySelector("#transfer-dialog");
+const transferForm = document.querySelector("#transfer-form");
+const transferCloseButton = document.querySelector("#transfer-close");
+const transferCancelButton = document.querySelector("#transfer-cancel");
+const transferOriginInput = document.querySelector("#transfer-origin");
+const transferDestinationInput = document.querySelector("#transfer-destination");
+const transferDepartureInput = document.querySelector("#transfer-departure-time");
+const transferArrivalInput = document.querySelector("#transfer-arrival-time");
+const transferAddManeuverButton = document.querySelector("#transfer-add-maneuver");
+const transferManeuversRoot = document.querySelector("#transfer-maneuvers");
+const transferFormError = document.querySelector("#transfer-form-error");
+const transferSummary = document.querySelector("#transfer-summary");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x020617);
@@ -97,6 +111,19 @@ const eclipticPlane = new THREE.Mesh(
 eclipticPlane.rotation.x = -Math.PI / 2;
 scene.add(eclipticPlane);
 
+const transferGroup = new THREE.Group();
+const transferLine = new THREE.Line(
+  new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({ color: 0xffa94d, transparent: true, opacity: 0.95 }),
+);
+const transferManeuverMarkers = new THREE.Group();
+const transferCurrentMarker = new THREE.Mesh(
+  new THREE.SphereGeometry(0.55, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0xffffff }),
+);
+transferGroup.add(transferLine, transferManeuverMarkers, transferCurrentMarker);
+scene.add(transferGroup);
+
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const meshEntries = [];
@@ -111,6 +138,8 @@ let isUpdatingRateInputs = false;
 let lastFrameTime = performance.now();
 let useCompactTimeControls = false;
 let useCompactRateControls = false;
+let currentTransfer = null;
+let transferCurve = null;
 
 function createLabel(name) {
   const label = document.createElement("div");
@@ -162,6 +191,245 @@ for (const body of BODIES) {
   bodyStates.set(body.name, { body, mesh, soiMesh, orbit, label, isMoon });
   meshEntries.push({ body, mesh });
   labelEntries.push({ body, mesh, label, isMoon });
+}
+
+function populateTransferBodySelects() {
+  const transferBodies = BODIES.filter((body) => body.parent);
+  for (const select of [transferOriginInput, transferDestinationInput]) {
+    select.replaceChildren();
+    for (const body of transferBodies) {
+      const option = document.createElement("option");
+      option.value = body.name;
+      option.textContent = body.name;
+      select.appendChild(option);
+    }
+  }
+
+  transferOriginInput.value = "Kerbin";
+  transferDestinationInput.value = "Jool";
+}
+
+function createManeuverRow(index, defaults = {}) {
+  const row = document.createElement("div");
+  row.className = "maneuver-row";
+
+  const header = document.createElement("div");
+  header.className = "maneuver-row-header";
+  const title = document.createElement("span");
+  title.textContent = `Zmiana ${index + 1}`;
+  const removeButton = document.createElement("button");
+  removeButton.className = "maneuver-remove";
+  removeButton.type = "button";
+  removeButton.textContent = "Usuń";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    refreshManeuverTitles();
+  });
+  header.append(title, removeButton);
+
+  const fields = document.createElement("div");
+  fields.className = "maneuver-fields";
+  const definitions = [
+    ["Nazwa", "name", defaults.name ?? "Manewr", "text"],
+    ["Czas [s]", "time", defaults.time ?? 0, "number"],
+    ["ΔV prograde [m/s]", "prograde", defaults.prograde ?? 0, "number"],
+    ["ΔV normal [m/s]", "normal", defaults.normal ?? 0, "number"],
+    ["ΔV radial [m/s]", "radial", defaults.radial ?? 0, "number"],
+    ["Wysokość orbity [m]", "orbitHeight", defaults.orbitHeight ?? 0, "number"],
+  ];
+
+  for (const [labelText, fieldName, value, type] of definitions) {
+    const label = document.createElement("label");
+    label.textContent = labelText;
+    const input = document.createElement("input");
+    input.type = type;
+    input.className = `maneuver-${fieldName}`;
+    input.value = String(value);
+    if (type === "number" && (fieldName === "time" || fieldName === "orbitHeight")) {
+      input.min = "0";
+    }
+    if (type === "number") {
+      input.step = "any";
+    }
+    label.appendChild(input);
+    fields.appendChild(label);
+  }
+
+  row.append(header, fields);
+  transferManeuversRoot.appendChild(row);
+}
+
+function refreshManeuverTitles() {
+  for (const [index, row] of [...transferManeuversRoot.querySelectorAll(".maneuver-row")].entries()) {
+    row.querySelector(".maneuver-row-header span").textContent = `Zmiana ${index + 1}`;
+  }
+}
+
+function readManeuvers() {
+  return [...transferManeuversRoot.querySelectorAll(".maneuver-row")].map((row) => ({
+    name: row.querySelector(".maneuver-name").value.trim() || "Manewr",
+    time: Number(row.querySelector(".maneuver-time").value),
+    prograde: Number(row.querySelector(".maneuver-prograde").value) || 0,
+    normal: Number(row.querySelector(".maneuver-normal").value) || 0,
+    radial: Number(row.querySelector(".maneuver-radial").value) || 0,
+    orbitHeight: Number(row.querySelector(".maneuver-orbitHeight").value) || 0,
+  }));
+}
+
+function getTransferAnchors(transfer) {
+  const startPosition = getScaledPosition(transfer.origin, transfer.departureTime);
+  const endPosition = getScaledPosition(transfer.destination, transfer.arrivalTime);
+  const start = new THREE.Vector3(startPosition.x, startPosition.y, startPosition.z);
+  const end = new THREE.Vector3(endPosition.x, endPosition.y, endPosition.z);
+  const anchors = [{ time: transfer.departureTime, position: start }];
+
+  for (const maneuver of transfer.maneuvers) {
+    const progress = (maneuver.time - transfer.departureTime) / (transfer.arrivalTime - transfer.departureTime);
+    anchors.push({
+      time: maneuver.time,
+      position: start.clone().lerp(end, progress),
+      maneuver,
+    });
+  }
+
+  anchors.push({ time: transfer.arrivalTime, position: end });
+  return anchors;
+}
+
+function clearTransferMarkers() {
+  while (transferManeuverMarkers.children.length > 0) {
+    const marker = transferManeuverMarkers.children[0];
+    transferManeuverMarkers.remove(marker);
+    marker.geometry.dispose();
+    marker.material.dispose();
+  }
+}
+
+function updateTransferSummary() {
+  if (!transferSummary) {
+    return;
+  }
+
+  if (!currentTransfer) {
+    transferSummary.textContent = "Brak zdefiniowanego transferu.";
+    return;
+  }
+
+  transferSummary.textContent =
+    `${currentTransfer.origin} → ${currentTransfer.destination} | ` +
+    `${currentTransfer.maneuvers.length} zmian | ` +
+    `${Math.floor(currentTransfer.departureTime)} s → ${Math.floor(currentTransfer.arrivalTime)} s`;
+}
+
+function updateTransferRoute() {
+  clearTransferMarkers();
+  transferLine.visible = false;
+  transferCurrentMarker.visible = false;
+  transferGroup.visible = Boolean(currentTransfer && showTransferInput.checked);
+
+  if (!currentTransfer) {
+    updateTransferSummary();
+    return;
+  }
+
+  const anchors = getTransferAnchors(currentTransfer);
+  transferCurve = new THREE.CatmullRomCurve3(
+    anchors.map((anchor) => anchor.position),
+    false,
+    "centripetal",
+    0.5,
+  );
+  transferLine.geometry.dispose();
+  transferLine.geometry = new THREE.BufferGeometry().setFromPoints(transferCurve.getPoints(160));
+  transferLine.visible = true;
+
+  for (const anchor of anchors.slice(1, -1)) {
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffd166 }),
+    );
+    marker.position.copy(anchor.position);
+    transferManeuverMarkers.add(marker);
+  }
+
+  updateTransferSummary();
+}
+
+function updateTransferCurrentMarker() {
+  if (!currentTransfer || !transferCurve || !showTransferInput.checked) {
+    transferCurrentMarker.visible = false;
+    return;
+  }
+
+  const progress =
+    (getCurrentTime() - currentTransfer.departureTime) /
+    (currentTransfer.arrivalTime - currentTransfer.departureTime);
+  if (progress < 0 || progress > 1) {
+    transferCurrentMarker.visible = false;
+    return;
+  }
+
+  transferCurrentMarker.position.copy(transferCurve.getPointAt(progress));
+  transferCurrentMarker.visible = true;
+}
+
+function setTransferFormError(message = "") {
+  transferFormError.textContent = message;
+}
+
+function openTransferDialog() {
+  setTransferFormError();
+  if (currentTransfer) {
+    transferOriginInput.value = currentTransfer.origin;
+    transferDestinationInput.value = currentTransfer.destination;
+    transferDepartureInput.value = String(currentTransfer.departureTime);
+    transferArrivalInput.value = String(currentTransfer.arrivalTime);
+    transferManeuversRoot.replaceChildren();
+    currentTransfer.maneuvers.forEach((maneuver, index) => createManeuverRow(index, maneuver));
+  }
+  transferDialog.showModal();
+}
+
+function closeTransferDialog() {
+  transferDialog.close();
+}
+
+function saveTransfer(event) {
+  event.preventDefault();
+  const departureTime = Number(transferDepartureInput.value);
+  const arrivalTime = Number(transferArrivalInput.value);
+  const maneuvers = readManeuvers().sort((left, right) => left.time - right.time);
+
+  if (!transferOriginInput.value || !transferDestinationInput.value) {
+    setTransferFormError("Wybierz ciało startowe i docelowe.");
+    return;
+  }
+  if (transferOriginInput.value === transferDestinationInput.value) {
+    setTransferFormError("Ciało startowe i docelowe muszą być różne.");
+    return;
+  }
+  if (!Number.isFinite(departureTime) || !Number.isFinite(arrivalTime) || arrivalTime <= departureTime) {
+    setTransferFormError("Czas dotarcia musi być większy od czasu startu.");
+    return;
+  }
+  if (maneuvers.some((maneuver) => !Number.isFinite(maneuver.time) || maneuver.time <= departureTime || maneuver.time >= arrivalTime)) {
+    setTransferFormError("Czasy zmian muszą leżeć pomiędzy startem i dotarciem.");
+    return;
+  }
+  if (maneuvers.some((maneuver, index) => index > 0 && maneuver.time <= maneuvers[index - 1].time)) {
+    setTransferFormError("Czasy kolejnych zmian muszą rosnąć.");
+    return;
+  }
+
+  currentTransfer = {
+    origin: transferOriginInput.value,
+    destination: transferDestinationInput.value,
+    departureTime,
+    arrivalTime,
+    maneuvers,
+  };
+  updateTransferRoute();
+  closeTransferDialog();
 }
 
 function resizeRenderer() {
@@ -451,6 +719,7 @@ function render(frameTime) {
   }
 
   updateBodies(getCurrentTime());
+  updateTransferCurrentMarker();
   updateLabels();
   controls.update();
   renderer.render(scene, camera);
@@ -498,6 +767,34 @@ if (showEclipticInput) {
 if (panelWidthInput) {
   panelWidthInput.addEventListener("input", updatePanelWidth);
   updatePanelWidth();
+}
+
+populateTransferBodySelects();
+if (transferAddManeuverButton) {
+  transferAddManeuverButton.addEventListener("click", () => {
+    const departureTime = Number(transferDepartureInput.value) || 0;
+    const arrivalTime = Number(transferArrivalInput.value) || departureTime + 1;
+    const count = transferManeuversRoot.querySelectorAll(".maneuver-row").length;
+    const time = departureTime + ((arrivalTime - departureTime) * (count + 1)) / (count + 2);
+    createManeuverRow(count, { time });
+  });
+}
+if (transferOpenButton) {
+  transferOpenButton.addEventListener("click", openTransferDialog);
+}
+if (transferCloseButton) {
+  transferCloseButton.addEventListener("click", closeTransferDialog);
+}
+if (transferCancelButton) {
+  transferCancelButton.addEventListener("click", closeTransferDialog);
+}
+if (transferForm) {
+  transferForm.addEventListener("submit", saveTransfer);
+}
+if (showTransferInput) {
+  showTransferInput.addEventListener("change", () => {
+    updateTransferRoute();
+  });
 }
 
 if (panelToggle && layoutRoot) {
