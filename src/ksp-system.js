@@ -1033,7 +1033,14 @@ export function getEscapeTrajectory(originName, departureTime, options = {}) {
 
   const horizonSeconds = Math.max(
     60 * 60 * 24,
-    Number(options.horizonSeconds) || 5 * 426 * 21600,
+    Number(options.horizonSeconds) ||
+      5 * 426 * 21600 +
+        Math.max(
+          0,
+          ...(options.maneuvers ?? []).map(
+            (maneuver) => Number(maneuver.time) - departureTime,
+          ),
+        ),
   );
   const searchStep = Math.max(60 * 60, Number(options.searchStepSeconds) || 6 * 21600);
   const candidates = BODIES.filter(
@@ -1046,6 +1053,7 @@ export function getEscapeTrajectory(originName, departureTime, options = {}) {
   const maneuvers = [...(options.maneuvers ?? [])]
     .filter((maneuver) => Number(maneuver.time) > start.solarStartTime)
     .sort((left, right) => left.time - right.time);
+  const approachSearchStart = maneuvers.at(-1)?.time ?? start.solarStartTime;
   const samples = [{ time: start.solarStartTime, state: start.solarStartState }];
   const maneuverPositions = [];
   let state = start.solarStartState;
@@ -1063,6 +1071,7 @@ export function getEscapeTrajectory(originName, departureTime, options = {}) {
     while (maneuverIndex < maneuvers.length && maneuvers[maneuverIndex].time <= time) {
       const maneuver = maneuvers[maneuverIndex];
       const maneuverState = propagateSegment(maneuver.time - segmentStartTime);
+      samples.push({ time: maneuver.time, state: maneuverState });
       maneuverPositions.push({
         time: maneuver.time,
         state: maneuverState,
@@ -1075,6 +1084,9 @@ export function getEscapeTrajectory(originName, departureTime, options = {}) {
 
     state = propagateSegment(time - segmentStartTime);
     samples.push({ time, state });
+    if (time < approachSearchStart) {
+      continue;
+    }
     for (const candidate of candidates) {
       const candidateState = getRelativeBodyState(
         candidate.name,

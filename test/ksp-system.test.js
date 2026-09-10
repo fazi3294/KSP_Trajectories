@@ -217,3 +217,21 @@ test("escape trajectory derives closest body and time from signed ejection angle
   );
   assert.notDeepEqual(trajectory.points[20], mirroredTrajectory.points[20]);
 });
+
+test("escape trajectory continues from the post-maneuver state", () => {
+  const maneuverTime = 2 * 21600;
+  const trajectory = getEscapeTrajectory("Kerbin", 0, {
+    departureOrbitHeight: 100000,
+    departureDeltaV: 950,
+    departureEscapeAngle: 0,
+    horizonSeconds: 100 * 21600,
+    maneuvers: [{ time: maneuverTime, prograde: 1000, normal: 0, radial: 0 }],
+  });
+  const maneuverIndex = trajectory.times.indexOf(maneuverTime);
+
+  assert.equal(trajectory.valid, true);
+  assert.equal(trajectory.maneuverPositions.length, 1);
+  assert.equal(maneuverIndex >= 0, true);
+  assert.equal(trajectory.times.at(-1) > maneuverTime, true);
+  assert.notDeepEqual(trajectory.points[maneuverIndex], trajectory.points[maneuverIndex + 1]);
+});
