@@ -135,6 +135,18 @@
             </div>
           </div>
           <label>
+            Wysokość orbity startowej [m] (opcjonalnie)
+            <input id="transfer-departure-orbit-height" type="number" min="0" step="any" placeholder="np. 100000" />
+          </label>
+          <label>
+            Δv ucieczki [m/s]
+            <input id="transfer-departure-delta-v" type="number" min="0" step="any" value="950" required />
+          </label>
+          <label>
+            Kąt ucieczki [°]
+            <input id="transfer-departure-escape-angle" type="number" step="any" value="0" required />
+          </label>
+          <label>
             Ciało docelowe
             <select id="transfer-destination"></select>
           </label>
@@ -148,6 +160,10 @@
               <label>s <input id="transfer-arrival-seconds" type="number" min="0" step="1" value="0" /></label>
             </div>
           </div>
+          <label>
+            Wysokość orbity docelowej [m] (opcjonalnie, przechwycenie)
+            <input id="transfer-arrival-orbit-height" type="number" min="0" step="any" placeholder="pozostaw puste bez przechwycenia" />
+          </label>
         </div>
 
         <div class="dialog-section">
@@ -155,7 +171,7 @@
             <h3>Manewry pośrednie</h3>
             <button id="transfer-add-maneuver" type="button">Dodaj zmianę</button>
           </div>
-          <p class="hint">Czas każdego manewru musi leżeć pomiędzy startem i dotarciem. Dzień i rok są liczone zgodnie z wybranym trybem czasu.</p>
+          <p class="hint">Położenie zmiany wynika wyłącznie z jej czasu. Składowe Δv są opcjonalne i służą do odwzorowania odpalenia; przy asyście grawitacyjnej pozostaw je równe zero. Dzień i rok są liczone zgodnie z wybranym trybem czasu.</p>
           <div id="transfer-maneuvers" class="maneuver-list"></div>
         </div>
 

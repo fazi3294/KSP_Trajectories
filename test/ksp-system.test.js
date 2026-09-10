@@ -8,6 +8,7 @@ import {
   getTransferPlan,
   getTransferSearchContext,
   getTransferState,
+  getTransferTrajectory,
   listTransferBodies,
 } from "../src/ksp-system.js";
 
@@ -147,4 +148,34 @@ test("Lambert transfer search context rejects bodies without a shared parent", (
 
   assert.equal(context.valid, false);
   assert.match(context.reason, /to samo ciało nadrzędne/i);
+});
+
+test("input-driven transfer trajectory uses start escape data and reaches target position", () => {
+  const departureTime = 0;
+  const arrivalTime = 60 * 60 * 24 * 120;
+  const options = {
+    departureOrbitHeight: 100000,
+    departureDeltaV: 950,
+    departureEscapeAngle: 15,
+    maneuvers: [
+      { time: arrivalTime / 2, prograde: 0, normal: 0, radial: 0 },
+    ],
+  };
+  const trajectory = getTransferTrajectory("Kerbin", "Duna", departureTime, arrivalTime, options);
+
+  assert.equal(trajectory.valid, true);
+  assert.equal(trajectory.points.length > 2, true);
+  assert.equal(trajectory.maneuverPositions.length, 1);
+  assertVectorClose(trajectory.points.at(-1), {
+    x: getBodyPosition("Duna", arrivalTime).x / 400000000,
+    y: getBodyPosition("Duna", arrivalTime).y / 400000000,
+    z: getBodyPosition("Duna", arrivalTime).z / 400000000,
+  });
+
+  const steeperEscape = getTransferTrajectory("Kerbin", "Duna", departureTime, arrivalTime, {
+    ...options,
+    departureEscapeAngle: 65,
+  });
+  assert.equal(steeperEscape.valid, true);
+  assert.notDeepEqual(steeperEscape.points[20], trajectory.points[20]);
 });

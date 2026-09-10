@@ -236,6 +236,25 @@ const degreesToRadians = (degrees) => (degrees * Math.PI) / 180;
 const TAU = Math.PI * 2;
 const DEFAULT_SEARCH_STEP = 60 * 60 * 6;
 const BODY_MU_BY_PARENT = new Map();
+const BODY_MU_BY_NAME = new Map([
+  ["Kerbol", 1.1723328e18],
+  ["Moho", 1.6860938e11],
+  ["Eve", 8.1717307e12],
+  ["Gilly", 8.2894498e8],
+  ["Kerbin", 3.5316e12],
+  ["Mun", 6.5138398e10],
+  ["Minmus", 1.7658e9],
+  ["Duna", 3.0136321e11],
+  ["Ike", 1.8568369e10],
+  ["Dres", 2.1484489e10],
+  ["Jool", 2.82528e14],
+  ["Laythe", 1.962e12],
+  ["Vall", 2.074815e11],
+  ["Tylo", 2.82528e12],
+  ["Bop", 2.4868349e9],
+  ["Pol", 7.2170208e8],
+  ["Eeloo", 7.4410815e10],
+]);
 
 for (const body of BODIES) {
   if (!body.parent || !body.semiMajorAxis || !body.orbitalPeriod || BODY_MU_BY_PARENT.has(body.parent)) {
@@ -761,6 +780,79 @@ function evaluateTransferCandidateWithContext(context, departureTime, arrivalTim
   };
 }
 
+function propagateTwoBody(position, velocity, timeSeconds, gravitationalParameter) {
+  if (timeSeconds <= 0) {
+    return { position, velocity };
+  }
+
+  const radius = magnitude(position);
+  const velocitySquared = dot(velocity, velocity);
+  const radialVelocity = dot(position, velocity) / radius;
+  const alpha = 2 / radius - velocitySquared / gravitationalParameter;
+  let universalAnomaly =
+    Math.sqrt(gravitationalParameter) * Math.abs(alpha) * timeSeconds;
+
+  if (!Number.isFinite(universalAnomaly) || universalAnomaly < 1e-8) {
+    universalAnomaly = Math.sqrt(gravitationalParameter) * timeSeconds / radius;
+  }
+
+  for (let iteration = 0; iteration < 80; iteration += 1) {
+    const zValue = alpha * universalAnomaly ** 2;
+    const cValue = stumpffC(zValue);
+    const sValue = stumpffS(zValue);
+    const equation =
+      (radius * radialVelocity / Math.sqrt(gravitationalParameter)) * universalAnomaly ** 2 * cValue +
+      (1 - alpha * radius) * universalAnomaly ** 3 * sValue +
+      radius * universalAnomaly -
+      Math.sqrt(gravitationalParameter) * timeSeconds;
+    const derivative =
+      (radius * radialVelocity / Math.sqrt(gravitationalParameter)) * universalAnomaly * (1 - zValue * sValue) +
+      (1 - alpha * radius) * universalAnomaly ** 2 * cValue +
+      radius;
+    const correction = equation / derivative;
+    universalAnomaly -= correction;
+
+    if (Math.abs(correction) < 1e-7) {
+      break;
+    }
+  }
+
+  const zValue = alpha * universalAnomaly ** 2;
+  const cValue = stumpffC(zValue);
+  const sValue = stumpffS(zValue);
+  const fValue = 1 - (universalAnomaly ** 2 / radius) * cValue;
+  const gValue =
+    timeSeconds -
+    (universalAnomaly ** 3 / Math.sqrt(gravitationalParameter)) * sValue;
+  const nextPosition = addVectors(scaleVector(position, fValue), scaleVector(velocity, gValue));
+  const nextRadius = magnitude(nextPosition);
+  const gDotValue = 1 - (universalAnomaly ** 2 / nextRadius) * cValue;
+  const fDotValue =
+    (Math.sqrt(gravitationalParameter) / (nextRadius * radius)) *
+    (alpha * universalAnomaly ** 3 * sValue - universalAnomaly);
+  const nextVelocity = addVectors(scaleVector(position, fDotValue), scaleVector(velocity, gDotValue));
+
+  return { position: nextPosition, velocity: nextVelocity };
+}
+
+function addManeuverVelocity(state, maneuver) {
+  const prograde = normalize(state.velocity);
+  const radial = normalize(state.position);
+  const normal = normalize(cross(state.position, state.velocity));
+  const deltaV = addVectors(
+    scaleVector(prograde, Number(maneuver.prograde) || 0),
+    addVectors(
+      scaleVector(normal, Number(maneuver.normal) || 0),
+      scaleVector(radial, Number(maneuver.radial) || 0),
+    ),
+  );
+
+  return {
+    position: state.position,
+    velocity: addVectors(state.velocity, deltaV),
+  };
+}
+
 export function getTransferPlan(originName, destinationName, departureTime, arrivalTime) {
   const context = getTransferSearchContext(originName, destinationName);
   if (!context.valid) {
@@ -788,6 +880,150 @@ export function getTransferPlan(originName, destinationName, departureTime, arri
   return {
     valid: true,
     ...getRoundedTransferDetails(plan),
+  };
+}
+
+export function getTransferTrajectory(
+  originName,
+  destinationName,
+  departureTime,
+  arrivalTime,
+  options = {},
+) {
+  const context = getTransferSearchContext(originName, destinationName);
+  if (!context.valid) {
+    return context;
+  }
+
+  if (!Number.isFinite(departureTime) || !Number.isFinite(arrivalTime) || arrivalTime <= departureTime) {
+    return { valid: false, reason: "Czas przybycia musi być większy od czasu odlotu." };
+  }
+
+  const maneuvers = [...(options.maneuvers ?? [])]
+    .filter((maneuver) => maneuver.time > departureTime && maneuver.time < arrivalTime)
+    .sort((left, right) => left.time - right.time);
+  const samplesPerSegment = Math.max(16, Math.floor(options.samplesPerSegment ?? 72));
+  const originBody = getBody(originName);
+  const destinationBody = getBody(destinationName);
+  const trajectoryMu = BODY_MU_BY_NAME.get(context.centerName) ?? context.gravitationalParameter;
+  const originState = getRelativeBodyState(
+    originName,
+    context.centerName,
+    departureTime,
+    { positionCache: new Map(), velocityCache: new Map() },
+  );
+  const originRadial = normalize(originState.position);
+  const originNormal = normalize(cross(originState.position, originState.velocity));
+  const originPrograde = normalize(cross(originNormal, originRadial));
+  const departureOrbitHeight = Math.max(0, Number(options.departureOrbitHeight) || 0);
+  const departureRadius = originBody.radius + departureOrbitHeight;
+  const bodyMu = BODY_MU_BY_NAME.get(originName);
+  const circularSpeed = bodyMu ? Math.sqrt(bodyMu / departureRadius) : 0;
+  const escapeAngle = degreesToRadians(Number(options.departureEscapeAngle) || 0);
+  const escapeDirection = normalize(
+    addVectors(
+      scaleVector(originPrograde, Math.cos(escapeAngle)),
+      scaleVector(originRadial, Math.sin(escapeAngle)),
+    ),
+  );
+  const startPosition = addVectors(originState.position, scaleVector(originRadial, departureRadius));
+  const startVelocity = addVectors(
+    originState.velocity,
+    addVectors(
+      scaleVector(originPrograde, circularSpeed),
+      scaleVector(escapeDirection, Math.max(0, Number(options.departureDeltaV) || 0)),
+    ),
+  );
+  const arrivalState = getRelativeBodyState(
+    destinationName,
+    context.centerName,
+    arrivalTime,
+    { positionCache: new Map(), velocityCache: new Map() },
+  );
+  const points = [];
+  const times = [];
+  const maneuverPositions = [];
+  let state = {
+    position: startPosition,
+    velocity: startVelocity,
+  };
+  let segmentStartTime = departureTime;
+
+  const appendSegment = (segmentEndTime, isFinalSegment = false) => {
+    const duration = segmentEndTime - segmentStartTime;
+    const segmentStartState = state;
+    for (let index = points.length === 0 ? 0 : 1; index <= samplesPerSegment; index += 1) {
+      const progress = index / samplesPerSegment;
+      const offsetTime = duration * progress;
+      const propagated = propagateTwoBody(
+        segmentStartState.position,
+        segmentStartState.velocity,
+        offsetTime,
+        trajectoryMu,
+      );
+      let position = propagated.position;
+      if (isFinalSegment && progress > 0.65) {
+        const approachProgress = (progress - 0.65) / 0.35;
+        const blend = approachProgress * approachProgress * (3 - 2 * approachProgress);
+        position = addVectors(
+          scaleVector(position, 1 - blend),
+          scaleVector(arrivalState.position, blend),
+        );
+      }
+      const parentPosition = getBodyPosition(context.centerName, segmentStartTime + offsetTime);
+      points.push(
+        scaleVector(addVectors(parentPosition, position), DISTANCE_SCALE),
+      );
+      times.push(segmentStartTime + offsetTime);
+    }
+
+    state = propagateTwoBody(
+      segmentStartState.position,
+      segmentStartState.velocity,
+      duration,
+      trajectoryMu,
+    );
+    segmentStartTime = segmentEndTime;
+  };
+
+  for (const maneuver of maneuvers) {
+    appendSegment(maneuver.time);
+    maneuverPositions.push(
+      scaleVector(
+        addVectors(getBodyPosition(context.centerName, maneuver.time), state.position),
+        DISTANCE_SCALE,
+      ),
+    );
+    state = addManeuverVelocity(state, maneuver);
+  }
+  appendSegment(arrivalTime, true);
+
+  const arrivalOrbitHeight = Math.max(0, Number(options.arrivalOrbitHeight) || 0);
+  if (arrivalOrbitHeight > 0) {
+    const radial = normalize(arrivalState.position);
+    const arrivalPosition = addVectors(
+      arrivalState.position,
+      scaleVector(radial, destinationBody.radius + arrivalOrbitHeight),
+    );
+    points.push(
+      scaleVector(
+        addVectors(getBodyPosition(context.centerName, arrivalTime), arrivalPosition),
+        DISTANCE_SCALE,
+      ),
+    );
+    times.push(arrivalTime);
+  }
+
+  const destinationPosition = getBodyPosition(destinationName, arrivalTime);
+  points.push(scaleVector(destinationPosition, DISTANCE_SCALE));
+  times.push(arrivalTime);
+
+  return {
+    valid: true,
+    points,
+    times,
+    maneuverPositions,
+    departureVelocity: startVelocity,
   };
 }
 
