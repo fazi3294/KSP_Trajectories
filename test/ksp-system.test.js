@@ -178,4 +178,14 @@ test("input-driven transfer trajectory uses start escape data and reaches target
   });
   assert.equal(steeperEscape.valid, true);
   assert.notDeepEqual(steeperEscape.points[20], trajectory.points[20]);
+  assert.equal(
+    trajectory.points.every((point) =>
+      [point.x, point.y, point.z].every((coordinate) => Number.isFinite(coordinate)),
+    ),
+    true,
+  );
+  assert.equal(
+    Math.max(...trajectory.points.map((point) => Math.hypot(point.x, point.y, point.z))) < 1000,
+    true,
+  );
 });
