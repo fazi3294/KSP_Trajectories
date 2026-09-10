@@ -46,6 +46,7 @@ const showTransferInput = document.querySelector("#show-transfer");
 const panelWidthInput = document.querySelector("#panel-width");
 const panelWidthValue = document.querySelector("#panel-width-value");
 const transferOpenButton = document.querySelector("#transfer-open");
+const transferDeleteButton = document.querySelector("#transfer-delete");
 const transferDialog = document.querySelector("#transfer-dialog");
 const transferForm = document.querySelector("#transfer-form");
 const transferCloseButton = document.querySelector("#transfer-close");
@@ -56,7 +57,6 @@ const transferDepartureOrbitHeightInput = document.querySelector("#transfer-depa
 const transferArrivalOrbitHeightInput = document.querySelector("#transfer-arrival-orbit-height");
 const transferDepartureDeltaVInput = document.querySelector("#transfer-departure-delta-v");
 const transferDepartureEscapeAngleInput = document.querySelector("#transfer-departure-escape-angle");
-const transferTimeUTInput = document.querySelector("#transfer-time-ut");
 const transferAddManeuverButton = document.querySelector("#transfer-add-maneuver");
 const transferManeuversRoot = document.querySelector("#transfer-maneuvers");
 const transferFormError = document.querySelector("#transfer-form-error");
@@ -144,7 +144,7 @@ let useCompactTimeControls = false;
 let useCompactRateControls = false;
 let currentTransfer = null;
 let transferTrajectory = null;
-let transferTimeUsesUT = Boolean(transferTimeUTInput?.checked);
+const transferUsesGameCalendar = true;
 
 function createLabel(name) {
   const label = document.createElement("div");
@@ -228,15 +228,15 @@ function getTransferTimeInput(prefix, part, root = document) {
     : root.querySelector(`.${prefix}-${part}`);
 }
 
-function readTransferTime(prefix, root = document, useUT = transferTimeUsesUT) {
+function readTransferTime(prefix, root = document) {
   const parts = Object.fromEntries(
     TRANSFER_TIME_PARTS.map(([part]) => [part, Number(getTransferTimeInput(prefix, part, root)?.value)]),
   );
-  return timePartsToSeconds(parts, useUT);
+  return timePartsToSeconds(parts, transferUsesGameCalendar);
 }
 
-function writeTransferTime(prefix, seconds, root = document, useUT = transferTimeUsesUT) {
-  const parts = secondsToTimeParts(seconds, useUT);
+function writeTransferTime(prefix, seconds, root = document) {
+  const parts = secondsToTimeParts(seconds, transferUsesGameCalendar);
   for (const [part] of TRANSFER_TIME_PARTS) {
     const input = getTransferTimeInput(prefix, part, root);
     if (input) {
@@ -246,33 +246,18 @@ function writeTransferTime(prefix, seconds, root = document, useUT = transferTim
 }
 
 function appendManeuverTimeFields(parent, seconds) {
-  const parts = secondsToTimeParts(seconds, transferTimeUsesUT);
+  const parts = secondsToTimeParts(seconds, transferUsesGameCalendar);
   for (const [part, labelText] of TRANSFER_TIME_PARTS) {
     const label = document.createElement("label");
     label.textContent = labelText;
     const input = document.createElement("input");
     input.type = "number";
     input.className = `maneuver-${part}`;
-    input.min = "0";
+    input.min = part === "years" || part === "days" ? "1" : "0";
     input.step = "1";
     input.value = String(parts[part]);
     label.appendChild(input);
     parent.appendChild(label);
-  }
-}
-
-function syncTransferTimeMode(previousUseUT, nextUseUT) {
-  const departureTime = readTransferTime("transfer-departure", document, previousUseUT);
-  const arrivalTime = readTransferTime("transfer-arrival", document, previousUseUT);
-  writeTransferTime("transfer-departure", departureTime, document, nextUseUT);
-  writeTransferTime("transfer-arrival", arrivalTime, document, nextUseUT);
-
-  for (const row of transferManeuversRoot.querySelectorAll(".maneuver-row")) {
-    const maneuverTime = readTransferTime("maneuver", row, previousUseUT);
-    const parts = secondsToTimeParts(maneuverTime, nextUseUT);
-    for (const [part] of TRANSFER_TIME_PARTS) {
-      row.querySelector(`.maneuver-${part}`).value = String(parts[part]);
-    }
   }
 }
 
@@ -371,7 +356,7 @@ function updateTransferSummary() {
   }
 
   const formatTime = (seconds) => {
-    const parts = secondsToTimeParts(seconds, transferTimeUsesUT);
+    const parts = secondsToTimeParts(seconds, transferUsesGameCalendar);
     return `Y${parts.years} D${parts.days} ${String(parts.hours).padStart(2, "0")}:${String(parts.minutes).padStart(
       2,
       "0",
@@ -477,6 +462,24 @@ function setTransferFormError(message = "") {
   transferFormError.textContent = message;
 }
 
+function resetTransferForm() {
+  transferOriginInput.value = "Kerbin";
+  transferDestinationInput.value = "Jool";
+  writeTransferTime("transfer-departure", 0);
+  writeTransferTime("transfer-arrival", 100 * 21600);
+  transferDepartureOrbitHeightInput.value = "";
+  transferArrivalOrbitHeightInput.value = "";
+  transferDepartureDeltaVInput.value = "950";
+  transferDepartureEscapeAngleInput.value = "0";
+  transferManeuversRoot.replaceChildren();
+}
+
+function updateTransferButtonState() {
+  const hasTransfer = Boolean(currentTransfer);
+  transferOpenButton.textContent = hasTransfer ? "Edytuj transfer" : "Nowy transfer";
+  transferDeleteButton.hidden = !hasTransfer;
+}
+
 function openTransferDialog() {
   setTransferFormError();
   if (currentTransfer) {
@@ -490,12 +493,21 @@ function openTransferDialog() {
     writeTransferTime("transfer-arrival", currentTransfer.arrivalTime);
     transferManeuversRoot.replaceChildren();
     currentTransfer.maneuvers.forEach((maneuver, index) => createManeuverRow(index, maneuver));
+  } else {
+    resetTransferForm();
   }
   transferDialog.showModal();
 }
 
 function closeTransferDialog() {
   transferDialog.close();
+}
+
+function deleteTransfer() {
+  currentTransfer = null;
+  transferTrajectory = null;
+  updateTransferRoute();
+  updateTransferButtonState();
 }
 
 function saveTransfer(event) {
@@ -556,6 +568,7 @@ function saveTransfer(event) {
   if (!updateTransferRoute()) {
     return;
   }
+  updateTransferButtonState();
   closeTransferDialog();
 }
 
@@ -897,6 +910,7 @@ if (panelWidthInput) {
 }
 
 populateTransferBodySelects();
+updateTransferButtonState();
 if (transferAddManeuverButton) {
   transferAddManeuverButton.addEventListener("click", () => {
     const departureTime = readTransferTime("transfer-departure");
@@ -920,12 +934,8 @@ if (transferCancelButton) {
 if (transferForm) {
   transferForm.addEventListener("submit", saveTransfer);
 }
-if (transferTimeUTInput) {
-  transferTimeUTInput.addEventListener("change", () => {
-    const nextUseUT = transferTimeUTInput.checked;
-    syncTransferTimeMode(transferTimeUsesUT, nextUseUT);
-    transferTimeUsesUT = nextUseUT;
-  });
+if (transferDeleteButton) {
+  transferDeleteButton.addEventListener("click", deleteTransfer);
 }
 if (showTransferInput) {
   showTransferInput.addEventListener("change", () => {
