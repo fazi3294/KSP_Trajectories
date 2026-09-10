@@ -7,6 +7,7 @@ import {
   getScaledPosition,
   getScaledSOI,
   getEscapeTrajectory,
+  getTransferTrajectory,
 } from "./ksp-system.js";
 import { secondsToTimeParts, timePartsToSeconds } from "./time.js";
 
@@ -52,7 +53,10 @@ const transferForm = document.querySelector("#transfer-form");
 const transferCloseButton = document.querySelector("#transfer-close");
 const transferCancelButton = document.querySelector("#transfer-cancel");
 const transferOriginInput = document.querySelector("#transfer-origin");
+const transferDestinationInput = document.querySelector("#transfer-destination");
 const transferDepartureOrbitHeightInput = document.querySelector("#transfer-departure-orbit-height");
+const transferAutoTargetInput = document.querySelector("#transfer-auto-target");
+const transferTargetFields = document.querySelector("#transfer-target-fields");
 const transferDepartureDeltaVInput = document.querySelector("#transfer-departure-delta-v");
 const transferDepartureEscapeAngleInput = document.querySelector("#transfer-departure-escape-angle");
 const transferAddManeuverButton = document.querySelector("#transfer-add-maneuver");
@@ -199,15 +203,18 @@ for (const body of BODIES) {
 
 function populateTransferBodySelects() {
   const transferBodies = BODIES.filter((body) => body.parent);
-  transferOriginInput.replaceChildren();
-  for (const body of transferBodies) {
-    const option = document.createElement("option");
-    option.value = body.name;
-    option.textContent = body.name;
-    transferOriginInput.appendChild(option);
+  for (const select of [transferOriginInput, transferDestinationInput]) {
+    select.replaceChildren();
+    for (const body of transferBodies) {
+      const option = document.createElement("option");
+      option.value = body.name;
+      option.textContent = body.name;
+      select.appendChild(option);
+    }
   }
 
   transferOriginInput.value = "Kerbin";
+  transferDestinationInput.value = "Jool";
 }
 
 const TRANSFER_TIME_PARTS = [
@@ -392,16 +399,25 @@ function updateTransferRoute() {
     return false;
   }
 
-  transferTrajectory = getEscapeTrajectory(
-    currentTransfer.origin,
-    currentTransfer.departureTime,
-    {
-      departureOrbitHeight: currentTransfer.departureOrbitHeight,
-      departureDeltaV: currentTransfer.departureDeltaV,
-      departureEscapeAngle: currentTransfer.departureEscapeAngle,
-      maneuvers: currentTransfer.maneuvers,
-    },
-  );
+  const trajectoryOptions = {
+    departureOrbitHeight: currentTransfer.departureOrbitHeight,
+    departureDeltaV: currentTransfer.departureDeltaV,
+    departureEscapeAngle: currentTransfer.departureEscapeAngle,
+    maneuvers: currentTransfer.maneuvers,
+  };
+  transferTrajectory = currentTransfer.autoTarget
+    ? getEscapeTrajectory(
+        currentTransfer.origin,
+        currentTransfer.departureTime,
+        trajectoryOptions,
+      )
+    : getTransferTrajectory(
+        currentTransfer.origin,
+        currentTransfer.destination,
+        currentTransfer.departureTime,
+        currentTransfer.arrivalTime,
+        trajectoryOptions,
+      );
   if (!transferTrajectory.valid) {
     setTransferFormError(transferTrajectory.reason);
     updateTransferSummary();
@@ -426,15 +442,20 @@ function updateTransferRoute() {
   }
 
   if (transferAutoResult) {
-    const distanceKm = transferTrajectory.closestApproachDistance / 1000;
-    const distanceText = distanceKm >= 1e6
-      ? `${(distanceKm / 1e6).toFixed(2)} mln km`
-      : `${Math.round(distanceKm).toLocaleString("pl-PL")} km`;
     const approachParts = secondsToTimeParts(transferTrajectory.arrivalTime, true);
-    transferAutoResult.textContent =
-      `${transferTrajectory.encountered ? "Cel" : "Najbliższe ciało"}: ${transferTrajectory.destinationName}; ` +
-      `${transferTrajectory.encountered ? "wejście w SOI" : "najbliższe zbliżenie"} ` +
-      `Y${approachParts.years} D${approachParts.days}, odległość ${distanceText}.`;
+    if (currentTransfer.autoTarget) {
+      const distanceKm = transferTrajectory.closestApproachDistance / 1000;
+      const distanceText = distanceKm >= 1e6
+        ? `${(distanceKm / 1e6).toFixed(2)} mln km`
+        : `${Math.round(distanceKm).toLocaleString("pl-PL")} km`;
+      transferAutoResult.textContent =
+        `${transferTrajectory.encountered ? "Cel" : "Najbliższe ciało"}: ${transferTrajectory.destinationName}; ` +
+        `${transferTrajectory.encountered ? "wejście w SOI" : "najbliższe zbliżenie"} ` +
+        `Y${approachParts.years} D${approachParts.days}, odległość ${distanceText}.`;
+    } else {
+      transferAutoResult.textContent =
+        `Cel: ${transferTrajectory.destinationName}; dotarcie Y${approachParts.years} D${approachParts.days}.`;
+    }
   }
 
   updateTransferSummary();
@@ -482,9 +503,20 @@ function setTransferFormError(message = "") {
   transferFormError.textContent = message;
 }
 
+function updateTransferTargetMode() {
+  const automatic = transferAutoTargetInput.checked;
+  transferTargetFields.hidden = automatic;
+  for (const input of transferTargetFields.querySelectorAll("input, select")) {
+    input.disabled = automatic;
+  }
+}
+
 function resetTransferForm() {
   transferOriginInput.value = "Kerbin";
+  transferDestinationInput.value = "Jool";
+  transferAutoTargetInput.checked = true;
   writeTransferTime("transfer-departure", 0);
+  writeTransferTime("transfer-arrival", 100 * 21600);
   transferDepartureOrbitHeightInput.value = "100000";
   transferDepartureDeltaVInput.value = "950";
   transferDepartureEscapeAngleInput.value = "0";
@@ -501,15 +533,19 @@ function openTransferDialog() {
   setTransferFormError();
   if (currentTransfer) {
     transferOriginInput.value = currentTransfer.origin;
+    transferDestinationInput.value = currentTransfer.destination ?? "Jool";
+    transferAutoTargetInput.checked = currentTransfer.autoTarget;
     transferDepartureOrbitHeightInput.value = currentTransfer.departureOrbitHeight;
     transferDepartureDeltaVInput.value = currentTransfer.departureDeltaV;
     transferDepartureEscapeAngleInput.value = currentTransfer.departureEscapeAngle;
     writeTransferTime("transfer-departure", currentTransfer.departureTime);
+    writeTransferTime("transfer-arrival", currentTransfer.arrivalTime ?? 100 * 21600);
     transferManeuversRoot.replaceChildren();
     currentTransfer.maneuvers.forEach((maneuver, index) => createManeuverRow(index, maneuver));
   } else {
     resetTransferForm();
   }
+  updateTransferTargetMode();
   transferDialog.showModal();
 }
 
@@ -527,6 +563,8 @@ function deleteTransfer() {
 function saveTransfer(event) {
   event.preventDefault();
   const departureTime = readTransferTime("transfer-departure");
+  const autoTarget = transferAutoTargetInput.checked;
+  const arrivalTime = autoTarget ? null : readTransferTime("transfer-arrival");
   const maneuvers = readManeuvers().sort((left, right) => left.time - right.time);
   const departureOrbitHeight = Number(transferDepartureOrbitHeightInput.value);
   const departureDeltaV = Number(transferDepartureDeltaVInput.value);
@@ -536,8 +574,16 @@ function saveTransfer(event) {
     setTransferFormError("Wybierz ciało startowe.");
     return;
   }
+  if (!autoTarget && (!transferDestinationInput.value || transferDestinationInput.value === transferOriginInput.value)) {
+    setTransferFormError("Wybierz inne ciało docelowe niż ciało startowe.");
+    return;
+  }
   if (!Number.isFinite(departureTime) || departureTime < 0) {
     setTransferFormError("Podaj poprawny czas startu.");
+    return;
+  }
+  if (!autoTarget && (!Number.isFinite(arrivalTime) || arrivalTime <= departureTime)) {
+    setTransferFormError("Czas dotarcia musi być większy od czasu startu.");
     return;
   }
   if (!Number.isFinite(departureOrbitHeight) || departureOrbitHeight <= 0) {
@@ -548,8 +594,16 @@ function saveTransfer(event) {
     setTransferFormError("Podaj poprawne Δv i kąt ucieczki dla startu.");
     return;
   }
-  if (maneuvers.some((maneuver) => !Number.isFinite(maneuver.time) || maneuver.time <= departureTime)) {
-    setTransferFormError("Czasy zmian muszą być późniejsze od czasu startu.");
+  if (maneuvers.some((maneuver) =>
+    !Number.isFinite(maneuver.time) ||
+    maneuver.time <= departureTime ||
+    (!autoTarget && maneuver.time > arrivalTime)
+  )) {
+    setTransferFormError(
+      autoTarget
+        ? "Czasy zmian muszą być późniejsze od czasu startu."
+        : "Czasy zmian muszą mieścić się od startu do dotarcia.",
+    );
     return;
   }
   if (maneuvers.some((maneuver, index) => index > 0 && maneuver.time <= maneuvers[index - 1].time)) {
@@ -559,7 +613,10 @@ function saveTransfer(event) {
 
   currentTransfer = {
     origin: transferOriginInput.value,
+    destination: autoTarget ? null : transferDestinationInput.value,
+    autoTarget,
     departureTime,
+    arrivalTime,
     departureOrbitHeight,
     departureDeltaV,
     departureEscapeAngle,
@@ -910,14 +967,21 @@ if (panelWidthInput) {
 }
 
 populateTransferBodySelects();
+updateTransferTargetMode();
 updateTransferButtonState();
 if (transferAddManeuverButton) {
   transferAddManeuverButton.addEventListener("click", () => {
     const departureTime = readTransferTime("transfer-departure");
+    const arrivalTime = transferAutoTargetInput.checked
+      ? null
+      : readTransferTime("transfer-arrival");
     const count = transferManeuversRoot.querySelectorAll(".maneuver-row").length;
     const safeDepartureTime = Number.isFinite(departureTime) ? departureTime : 0;
     const defaultHorizon = 100 * 21600;
-    const time = safeDepartureTime + (defaultHorizon * (count + 1)) / (count + 2);
+    const safeArrivalTime = Number.isFinite(arrivalTime)
+      ? arrivalTime
+      : safeDepartureTime + defaultHorizon;
+    const time = safeDepartureTime + ((safeArrivalTime - safeDepartureTime) * (count + 1)) / (count + 2);
     createManeuverRow(count, { time });
   });
 }
@@ -932,6 +996,9 @@ if (transferCancelButton) {
 }
 if (transferForm) {
   transferForm.addEventListener("submit", saveTransfer);
+}
+if (transferAutoTargetInput) {
+  transferAutoTargetInput.addEventListener("change", updateTransferTargetMode);
 }
 if (transferDeleteButton) {
   transferDeleteButton.addEventListener("click", deleteTransfer);

@@ -148,6 +148,26 @@
             0° oznacza pozycję w kierunku prograde planety, -90° pozycję za planetą,
             a dodatnie i ujemne wartości są dozwolone.
           </p>
+          <label class="transfer-auto-toggle">
+            <input id="transfer-auto-target" type="checkbox" checked />
+            Automatycznie wyznacz cel i czas najbliższego zbliżenia
+          </label>
+          <div id="transfer-target-fields" class="transfer-target-fields" hidden>
+            <label>
+              Ciało docelowe
+              <select id="transfer-destination"></select>
+            </label>
+            <div class="transfer-time-control">
+              <span>Czas dotarcia</span>
+              <div class="transfer-time-parts">
+                <label>Y <input id="transfer-arrival-years" type="number" min="1" step="1" value="1" /></label>
+                <label>D <input id="transfer-arrival-days" type="number" min="1" step="1" value="101" /></label>
+                <label>H <input id="transfer-arrival-hours" type="number" min="0" step="1" value="0" /></label>
+                <label>m <input id="transfer-arrival-minutes" type="number" min="0" step="1" value="0" /></label>
+                <label>s <input id="transfer-arrival-seconds" type="number" min="0" step="1" value="0" /></label>
+              </div>
+            </div>
+          </div>
           <p id="transfer-auto-result" class="hint">
             Cel i czas najbliższego zbliżenia zostaną wyznaczone z propagacji trajektorii.
           </p>
