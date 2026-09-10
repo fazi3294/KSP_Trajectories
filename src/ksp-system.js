@@ -1375,7 +1375,7 @@ export function getTransferTrajectory(
   }
 
   const maneuvers = [...(options.maneuvers ?? [])]
-    .filter((maneuver) => maneuver.time > departureTime && maneuver.time < arrivalTime)
+    .filter((maneuver) => maneuver.time > departureTime && maneuver.time <= arrivalTime)
     .sort((left, right) => left.time - right.time);
   const samplesPerSegment = Math.max(16, Math.floor(options.samplesPerSegment ?? 72));
   const originBody = getBody(originName);
@@ -1525,7 +1525,7 @@ export function getTransferTrajectory(
   };
 
   for (const maneuver of maneuvers) {
-    appendSegment(maneuver.time);
+    appendSegment(maneuver.time, maneuver.time === arrivalTime);
     maneuverPositions.push(
       scaleVector(
         addVectors(getBodyPosition(context.centerName, maneuver.time), state.position),
@@ -1534,7 +1534,9 @@ export function getTransferTrajectory(
     );
     state = addManeuverVelocity(state, maneuver);
   }
-  appendSegment(arrivalTime, true);
+  if (segmentStartTime < arrivalTime) {
+    appendSegment(arrivalTime, true);
+  }
 
   const arrivalOrbitHeight = Math.max(0, Number(options.arrivalOrbitHeight) || 0);
   if (arrivalOrbitHeight > 0) {
@@ -1561,6 +1563,10 @@ export function getTransferTrajectory(
     points,
     times,
     maneuverPositions,
+    destinationName,
+    arrivalTime,
+    encountered: true,
+    closestApproachDistance: 0,
     departureVelocity: solarStartVelocity,
   };
 }

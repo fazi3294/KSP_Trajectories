@@ -235,3 +235,26 @@ test("escape trajectory continues from the post-maneuver state", () => {
   assert.equal(trajectory.times.at(-1) > maneuverTime, true);
   assert.notDeepEqual(trajectory.points[maneuverIndex], trajectory.points[maneuverIndex + 1]);
 });
+
+test("targeted transfer keeps the arrival circularization maneuver", () => {
+  const departureTime = 24337205;
+  const dsmTime = 25013437;
+  const arrivalTime = 50324030;
+  const trajectory = getTransferTrajectory("Kerbin", "Jool", departureTime, arrivalTime, {
+    departureOrbitHeight: 100000,
+    departureDeltaV: 1950,
+    departureEscapeAngle: -115.8,
+    maneuvers: [
+      { time: dsmTime, prograde: 1.9, normal: 4.6, radial: 5.6 },
+      { time: arrivalTime, prograde: -2867.9, normal: 0, radial: 0 },
+    ],
+  });
+
+  assert.equal(trajectory.valid, true);
+  assert.equal(trajectory.maneuverPositions.length, 2);
+  assertVectorClose(trajectory.points.at(-1), {
+    x: getBodyPosition("Jool", arrivalTime).x / 400000000,
+    y: getBodyPosition("Jool", arrivalTime).y / 400000000,
+    z: getBodyPosition("Jool", arrivalTime).z / 400000000,
+  });
+});
