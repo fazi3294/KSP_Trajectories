@@ -114,23 +114,40 @@
           <button id="transfer-close" class="dialog-close" type="button" aria-label="Zamknij">×</button>
         </div>
 
+        <label class="transfer-time-mode">
+          <input id="transfer-time-ut" type="checkbox" checked />
+          Tryb UT (rok 0, dzień 0)
+        </label>
+
         <div class="transfer-endpoints">
           <label>
             Ciało startowe
             <select id="transfer-origin"></select>
           </label>
-          <label>
-            Czas startu [s]
-            <input id="transfer-departure-time" type="number" min="0" step="1" value="0" />
-          </label>
+          <div class="transfer-time-control">
+            <span>Czas startu</span>
+            <div class="transfer-time-parts">
+              <label>Y <input id="transfer-departure-years" type="number" min="0" step="1" value="0" /></label>
+              <label>D <input id="transfer-departure-days" type="number" min="0" step="1" value="0" /></label>
+              <label>H <input id="transfer-departure-hours" type="number" min="0" step="1" value="0" /></label>
+              <label>m <input id="transfer-departure-minutes" type="number" min="0" step="1" value="0" /></label>
+              <label>s <input id="transfer-departure-seconds" type="number" min="0" step="1" value="0" /></label>
+            </div>
+          </div>
           <label>
             Ciało docelowe
             <select id="transfer-destination"></select>
           </label>
-          <label>
-            Czas dotarcia [s]
-            <input id="transfer-arrival-time" type="number" min="0" step="1" value="10000000" />
-          </label>
+          <div class="transfer-time-control">
+            <span>Czas dotarcia</span>
+            <div class="transfer-time-parts">
+              <label>Y <input id="transfer-arrival-years" type="number" min="0" step="1" value="0" /></label>
+              <label>D <input id="transfer-arrival-days" type="number" min="0" step="1" value="100" /></label>
+              <label>H <input id="transfer-arrival-hours" type="number" min="0" step="1" value="0" /></label>
+              <label>m <input id="transfer-arrival-minutes" type="number" min="0" step="1" value="0" /></label>
+              <label>s <input id="transfer-arrival-seconds" type="number" min="0" step="1" value="0" /></label>
+            </div>
+          </div>
         </div>
 
         <div class="dialog-section">
@@ -138,7 +155,7 @@
             <h3>Manewry pośrednie</h3>
             <button id="transfer-add-maneuver" type="button">Dodaj zmianę</button>
           </div>
-          <p class="hint">Czas każdego manewru musi leżeć pomiędzy startem i dotarciem.</p>
+          <p class="hint">Czas każdego manewru musi leżeć pomiędzy startem i dotarciem. Dzień i rok są liczone zgodnie z wybranym trybem czasu.</p>
           <div id="transfer-maneuvers" class="maneuver-list"></div>
         </div>
 
