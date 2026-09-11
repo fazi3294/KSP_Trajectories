@@ -220,7 +220,11 @@ test("escape trajectory derives closest body and time from signed ejection angle
 });
 
 test("escape trajectory continues from the post-maneuver state", () => {
-  const maneuverTime = 2 * 21600;
+  // With accurate propagation this marginal escape burn (only slightly above
+  // escape velocity) takes several days to actually leave Kerbin's SOI, so the
+  // maneuver must be scheduled well after that to land in the post-escape
+  // (solar-frame) segment rather than being silently dropped.
+  const maneuverTime = 20 * 21600;
   const trajectory = getEscapeTrajectory("Kerbin", 0, {
     departureOrbitHeight: 100000,
     departureDeltaV: 950,
