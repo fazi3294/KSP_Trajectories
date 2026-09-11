@@ -1472,7 +1472,7 @@ export function getTransferTrajectory(
   };
   let segmentStartTime = departureTime + localDuration;
 
-  const appendSegment = (segmentEndTime, isFinalSegment = false) => {
+  const appendSegment = (segmentEndTime) => {
     const duration = segmentEndTime - segmentStartTime;
     const segmentStartState = state;
     const keplerOrbit = createKeplerOrbit(
@@ -1493,29 +1493,9 @@ export function getTransferTrajectory(
       const progress = index / samplesPerSegment;
       const offsetTime = duration * progress;
       const propagated = propagateSegment(offsetTime);
-      let position = propagated.position;
-      if (isFinalSegment && progress > 0.65) {
-        const approachProgress = (progress - 0.65) / 0.35;
-        const blend = approachProgress * approachProgress * (3 - 2 * approachProgress);
-        const currentRadius = Math.max(1, Math.hypot(position.x, position.z));
-        const targetRadius = Math.max(1, Math.hypot(arrivalState.position.x, arrivalState.position.z));
-        const currentAngle = Math.atan2(position.z, position.x);
-        const targetAngle = Math.atan2(arrivalState.position.z, arrivalState.position.x);
-        const angleDelta = Math.atan2(
-          Math.sin(targetAngle - currentAngle),
-          Math.cos(targetAngle - currentAngle),
-        );
-        const angle = currentAngle + angleDelta * blend;
-        const radius = currentRadius + (targetRadius - currentRadius) * blend;
-        position = {
-          x: radius * Math.cos(angle),
-          y: position.y + (arrivalState.position.y - position.y) * blend,
-          z: radius * Math.sin(angle),
-        };
-      }
       const parentPosition = getBodyPosition(context.centerName, segmentStartTime + offsetTime);
       points.push(
-        scaleVector(addVectors(parentPosition, position), DISTANCE_SCALE),
+        scaleVector(addVectors(parentPosition, propagated.position), DISTANCE_SCALE),
       );
       times.push(segmentStartTime + offsetTime);
     }
@@ -1525,7 +1505,7 @@ export function getTransferTrajectory(
   };
 
   for (const maneuver of maneuvers) {
-    appendSegment(maneuver.time, maneuver.time === arrivalTime);
+    appendSegment(maneuver.time);
     maneuverPositions.push(
       scaleVector(
         addVectors(getBodyPosition(context.centerName, maneuver.time), state.position),
@@ -1535,28 +1515,11 @@ export function getTransferTrajectory(
     state = addManeuverVelocity(state, maneuver);
   }
   if (segmentStartTime < arrivalTime) {
-    appendSegment(arrivalTime, true);
+    appendSegment(arrivalTime);
   }
 
-  const arrivalOrbitHeight = Math.max(0, Number(options.arrivalOrbitHeight) || 0);
-  if (arrivalOrbitHeight > 0) {
-    const radial = normalize(arrivalState.position);
-    const arrivalPosition = addVectors(
-      arrivalState.position,
-      scaleVector(radial, destinationBody.radius + arrivalOrbitHeight),
-    );
-    points.push(
-      scaleVector(
-        addVectors(getBodyPosition(context.centerName, arrivalTime), arrivalPosition),
-        DISTANCE_SCALE,
-      ),
-    );
-    times.push(arrivalTime);
-  }
-
-  const destinationPosition = getBodyPosition(destinationName, arrivalTime);
-  points.push(scaleVector(destinationPosition, DISTANCE_SCALE));
-  times.push(arrivalTime);
+  const finalDistance = magnitude(subtractVectors(state.position, arrivalState.position));
+  const encountered = Number.isFinite(destinationBody.soi) ? finalDistance <= destinationBody.soi : false;
 
   return {
     valid: true,
@@ -1565,8 +1528,8 @@ export function getTransferTrajectory(
     maneuverPositions,
     destinationName,
     arrivalTime,
-    encountered: true,
-    closestApproachDistance: 0,
+    encountered,
+    closestApproachDistance: finalDistance,
     departureVelocity: solarStartVelocity,
   };
 }

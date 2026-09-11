@@ -151,7 +151,7 @@ test("Lambert transfer search context rejects bodies without a shared parent", (
   assert.match(context.reason, /to samo ciało nadrzędne/i);
 });
 
-test("input-driven transfer trajectory uses start escape data and reaches target position", () => {
+test("input-driven transfer trajectory keeps propagating without snapping to the target", () => {
   const departureTime = 0;
   const arrivalTime = 60 * 60 * 24 * 120;
   const options = {
@@ -167,7 +167,8 @@ test("input-driven transfer trajectory uses start escape data and reaches target
   assert.equal(trajectory.valid, true);
   assert.equal(trajectory.points.length > 2, true);
   assert.equal(trajectory.maneuverPositions.length, 1);
-  assertVectorClose(trajectory.points.at(-1), {
+  assert.equal(trajectory.encountered, false);
+  assert.notDeepEqual(trajectory.points.at(-1), {
     x: getBodyPosition("Duna", arrivalTime).x / 400000000,
     y: getBodyPosition("Duna", arrivalTime).y / 400000000,
     z: getBodyPosition("Duna", arrivalTime).z / 400000000,
@@ -252,7 +253,8 @@ test("targeted transfer keeps the arrival circularization maneuver", () => {
 
   assert.equal(trajectory.valid, true);
   assert.equal(trajectory.maneuverPositions.length, 2);
-  assertVectorClose(trajectory.points.at(-1), {
+  assert.equal(trajectory.encountered, false);
+  assert.notDeepEqual(trajectory.points.at(-1), {
     x: getBodyPosition("Jool", arrivalTime).x / 400000000,
     y: getBodyPosition("Jool", arrivalTime).y / 400000000,
     z: getBodyPosition("Jool", arrivalTime).z / 400000000,

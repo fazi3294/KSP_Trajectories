@@ -453,8 +453,14 @@ function updateTransferRoute() {
         `${transferTrajectory.encountered ? "wejście w SOI" : "najbliższe zbliżenie"} ` +
         `Y${approachParts.years} D${approachParts.days}, odległość ${distanceText}.`;
     } else {
+      const distanceKm = transferTrajectory.closestApproachDistance / 1000;
+      const distanceText = distanceKm >= 1e6
+        ? `${(distanceKm / 1e6).toFixed(2)} mln km`
+        : `${Math.round(distanceKm).toLocaleString("pl-PL")} km`;
       transferAutoResult.textContent =
-        `Cel: ${transferTrajectory.destinationName}; dotarcie Y${approachParts.years} D${approachParts.days}.`;
+        `${transferTrajectory.encountered ? "Cel" : "Najbliższe zbliżenie"}: ${transferTrajectory.destinationName}; ` +
+        `${transferTrajectory.encountered ? "dotarcie" : "najbliższe zbliżenie"} ` +
+        `Y${approachParts.years} D${approachParts.days}, odległość ${distanceText}.`;
     }
   }
 
