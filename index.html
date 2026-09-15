@@ -141,12 +141,12 @@
             <input id="transfer-departure-delta-v" type="number" min="0" step="any" value="950" required />
           </label>
           <label>
-            Pozycja odpalenia względem prograde [°]
+            Kąt ucieczki względem prograde planety [°]
             <input id="transfer-departure-escape-angle" type="number" step="any" value="0" required />
           </label>
           <p class="hint transfer-angle-hint">
-            0° oznacza pozycję w kierunku prograde planety, -90° pozycję za planetą,
-            a dodatnie i ujemne wartości są dozwolone.
+            To ten sam parametr co "Ejection angle" z Transfer Window Planner:
+            0° = pozycja w kierunku prograde planety, wartości dodatnie i ujemne są dozwolone.
           </p>
           <label class="transfer-auto-toggle">
             <input id="transfer-auto-target" type="checkbox" checked />
