@@ -374,12 +374,16 @@ function updateTransferSummary() {
   const approachLabel = transferTrajectory.encountered
     ? "wejście w SOI"
     : "najbliższe zbliżenie";
+  const approachTime =
+    transferTrajectory.encountered && Number.isFinite(transferTrajectory.encounterTime)
+      ? transferTrajectory.encounterTime
+      : transferTrajectory.arrivalTime;
   const destinationLabel = transferTrajectory.encountered
     ? `${currentTransfer.origin} → ${transferTrajectory.destinationName}`
     : `${currentTransfer.origin} → najbliżej ${transferTrajectory.destinationName}`;
   transferSummary.textContent =
     `${destinationLabel} | ` +
-    `${approachLabel}: ${formatTime(transferTrajectory.arrivalTime)} | ` +
+    `${approachLabel}: ${formatTime(approachTime)} | ` +
     `${currentTransfer.maneuvers.length} zmian`;
 }
 
@@ -442,7 +446,11 @@ function updateTransferRoute() {
   }
 
   if (transferAutoResult) {
-    const approachParts = secondsToTimeParts(transferTrajectory.arrivalTime, true);
+    const approachTime =
+      transferTrajectory.encountered && Number.isFinite(transferTrajectory.encounterTime)
+        ? transferTrajectory.encounterTime
+        : transferTrajectory.arrivalTime;
+    const approachParts = secondsToTimeParts(approachTime, true);
     if (currentTransfer.autoTarget) {
       const distanceKm = transferTrajectory.closestApproachDistance / 1000;
       const distanceText = distanceKm >= 1e6

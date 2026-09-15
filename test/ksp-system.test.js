@@ -12,6 +12,7 @@ import {
   getTransferTrajectory,
   listTransferBodies,
 } from "../src/ksp-system.js";
+import { timePartsToSeconds } from "../src/time.js";
 
 function assertVectorClose(actual, expected, tolerance = 1e-6) {
   assert.ok(Math.abs(actual.x - expected.x) < tolerance);
@@ -63,26 +64,24 @@ test("UT 0 positions follow stock orbital elements", () => {
   });
 
   assertVectorClose(getBodyPosition("Moho", 0), {
-    x: -555132604.2089658,
-    y: -200018093.33316424,
-    z: 6288140326.440433,
+    x: -568676232.2539349,
+    y: -198406748.03839207,
+    z: -6286981017.636776,
   });
 
   assertVectorClose(getBodyPosition("Minmus", 0), {
-    x: -13579599059.215322,
-    y: -1152398.0594368556,
-    z: -20750832.4521845,
+    x: -13645468805.909271,
+    y: 4912696.964371395,
+    z: 31725932.445057634,
   });
 });
 
 test("time propagation moves a reference-plane orbit counterclockwise in the front view", () => {
   const start = getBodyPosition("Kerbin", 0);
   const next = getBodyPosition("Kerbin", 60);
-  const startScreenY = -start.z;
-  const nextScreenY = -next.z;
   const signedTurn =
-    start.x * nextScreenY -
-    startScreenY * next.x;
+    start.x * next.z -
+    start.z * next.x;
 
   assert.ok(signedTurn > 0);
 });
@@ -257,10 +256,39 @@ test("targeted transfer keeps the arrival circularization maneuver", () => {
 
   assert.equal(trajectory.valid, true);
   assert.equal(trajectory.maneuverPositions.length, 2);
-  assert.equal(trajectory.encountered, false);
+  assert.equal(trajectory.encountered, true);
   assert.notDeepEqual(trajectory.points.at(-1), {
     x: getBodyPosition("Jool", arrivalTime).x / 400000000,
     y: getBodyPosition("Jool", arrivalTime).y / 400000000,
     z: getBodyPosition("Jool", arrivalTime).z / 400000000,
   });
+});
+
+test("planner-style Kerbin-Jool transfer enters Jool SOI before final burn", () => {
+  const departureTime = timePartsToSeconds(
+    { years: 3, days: 273, hours: 5, minutes: 29, seconds: 2 },
+    true,
+  );
+  const dsmTime = timePartsToSeconds(
+    { years: 3, days: 314, hours: 3, minutes: 35, seconds: 33 },
+    true,
+  );
+  const arrivalTime = timePartsToSeconds(
+    { years: 6, days: 191, hours: 2, minutes: 44, seconds: 15 },
+    true,
+  );
+  const trajectory = getTransferTrajectory("Kerbin", "Jool", departureTime, arrivalTime, {
+    departureOrbitHeight: 100000,
+    departureDeltaV: 1937,
+    departureEscapeAngle: -114.1,
+    maneuvers: [{ time: dsmTime, prograde: 21.5, normal: 7.8, radial: 7.2 }],
+  });
+
+  assert.equal(trajectory.valid, true);
+  assert.equal(trajectory.encountered, true);
+  assert.equal(Number.isFinite(trajectory.encounterTime), true);
+  assert.equal(trajectory.encounterTime < arrivalTime, true);
+  assert.equal((arrivalTime - trajectory.encounterTime) > 60 * 21600, true);
+  assert.equal((arrivalTime - trajectory.encounterTime) < 70 * 21600, true);
+  assert.equal(trajectory.closestApproachDistance < 100000 * 1000, true);
 });

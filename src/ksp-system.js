@@ -277,15 +277,15 @@ const scaleVector = (vector, scalar) => ({
 });
 
 const rotateInReferencePlane = (vector, angle) => ({
-  x: vector.x * Math.cos(angle) + vector.z * Math.sin(angle),
+  x: vector.x * Math.cos(angle) - vector.z * Math.sin(angle),
   y: vector.y,
-  z: -vector.x * Math.sin(angle) + vector.z * Math.cos(angle),
+  z: vector.x * Math.sin(angle) + vector.z * Math.cos(angle),
 });
 
 const rotateAroundXAxis = (vector, angle) => ({
   x: vector.x,
-  y: vector.y * Math.cos(angle) - vector.z * Math.sin(angle),
-  z: vector.y * Math.sin(angle) + vector.z * Math.cos(angle),
+  y: vector.y * Math.cos(angle) + vector.z * Math.sin(angle),
+  z: -vector.y * Math.sin(angle) + vector.z * Math.cos(angle),
 });
 
 function solveEccentricAnomaly(meanAnomaly, eccentricity) {
@@ -318,9 +318,7 @@ function transformOrbitalPlanePosition(body, position) {
 function getBodyPositionInParentFrame(body, timeSeconds) {
   const eccentricity = body.eccentricity ?? 0;
   const meanMotion = TAU / body.orbitalPeriod;
-  // The rendered reference plane is viewed from +Z, so increasing the
-  // orbital angle must be propagated backwards to appear counterclockwise.
-  const meanAnomaly = normalizeAngle((body.meanAnomalyAtEpochRad ?? 0) - timeSeconds * meanMotion);
+  const meanAnomaly = normalizeAngle((body.meanAnomalyAtEpochRad ?? 0) + timeSeconds * meanMotion);
   const eccentricAnomaly = solveEccentricAnomaly(meanAnomaly, eccentricity);
   const semiMinorAxis = body.semiMajorAxis * Math.sqrt(1 - eccentricity ** 2);
 
@@ -1214,11 +1212,15 @@ export function getTransferTrajectory(
   const originBody = getBody(originName);
   const destinationBody = getBody(destinationName);
   const trajectoryMu = BODY_MU_BY_NAME.get(context.centerName) ?? context.gravitationalParameter;
+  const trajectoryCaches = {
+    positionCache: new Map(),
+    velocityCache: new Map(),
+  };
   const originState = getRelativeBodyState(
     originName,
     context.centerName,
     departureTime,
-    { positionCache: new Map(), velocityCache: new Map() },
+    trajectoryCaches,
   );
   const departureOrbitHeight = Math.max(0, Number(options.departureOrbitHeight) || 0);
   const departureRadius = originBody.radius + departureOrbitHeight;
@@ -1230,12 +1232,6 @@ export function getTransferTrajectory(
   // the convention used by real transfer-planner tools (e.g. -90 deg is a
   // burn location trailing the body, on the sunward side of its orbit).
   const { parkingRadial, parkingPrograde } = resolveEscapeParkingBasis(originState, escapeAngle);
-  const arrivalState = getRelativeBodyState(
-    destinationName,
-    context.centerName,
-    arrivalTime,
-    { positionCache: new Map(), velocityCache: new Map() },
-  );
   const points = [];
   const times = [];
   const maneuverPositions = [];
@@ -1308,29 +1304,186 @@ export function getTransferTrajectory(
     velocity: solarStartVelocity,
   };
   let segmentStartTime = departureTime + localDuration;
+  let centerName = context.centerName;
+  let gravitationalParameter = trajectoryMu;
+  let encounterTime = null;
+  let closestApproachDistance = Infinity;
+  let closestApproachTime = null;
 
-  const appendSegment = (segmentEndTime) => {
-    const duration = segmentEndTime - segmentStartTime;
-    const segmentStartState = state;
-    const propagateSegment = (offsetTime) =>
-      propagateTwoBody(
-        segmentStartState.position,
-        segmentStartState.velocity,
-        offsetTime,
-        trajectoryMu,
-      );
-    for (let index = points.length === 0 ? 0 : 1; index <= samplesPerSegment; index += 1) {
-      const progress = index / samplesPerSegment;
-      const offsetTime = duration * progress;
-      const propagated = propagateSegment(offsetTime);
-      const parentPosition = getBodyPosition(context.centerName, segmentStartTime + offsetTime);
-      points.push(
-        scaleVector(addVectors(parentPosition, propagated.position), DISTANCE_SCALE),
-      );
-      times.push(segmentStartTime + offsetTime);
+  const getDestinationDistance = (candidateState, candidateCenterName, time) => {
+    if (candidateCenterName === destinationName) {
+      return magnitude(candidateState.position);
     }
 
-    state = propagateSegment(duration);
+    const candidateDestinationState = getRelativeBodyState(
+      destinationName,
+      context.centerName,
+      time,
+      trajectoryCaches,
+    );
+    return magnitude(
+      subtractVectors(candidateState.position, candidateDestinationState.position),
+    );
+  };
+
+  const recordApproach = (candidateState, candidateCenterName, time) => {
+    const distance = getDestinationDistance(candidateState, candidateCenterName, time);
+    if (distance < closestApproachDistance) {
+      closestApproachDistance = distance;
+      closestApproachTime = time;
+    }
+    if (
+      encounterTime === null &&
+      distance <= destinationBody.soi
+    ) {
+      encounterTime = time;
+    }
+  };
+
+  const findSoiBoundary = (fromTime, fromState, toTime) => {
+    const soi = destinationBody.soi;
+    const entering = centerName !== destinationName;
+    const startDistance = getDestinationDistance(fromState, centerName, fromTime);
+    const startInside = startDistance <= soi;
+
+    if ((entering && startInside) || (!entering && !startInside)) {
+      return {
+        time: fromTime,
+        entering,
+      };
+    }
+
+    const scanStep = Math.min(6 * 60 * 60, Math.max(60, (toTime - fromTime) / 512));
+    let previousTime = fromTime;
+    let previousDistance = startDistance;
+    for (
+      let nextTime = Math.min(toTime, previousTime + scanStep);
+      previousTime < toTime;
+      nextTime = Math.min(toTime, previousTime + scanStep)
+    ) {
+      const nextState = propagateTwoBody(
+        fromState.position,
+        fromState.velocity,
+        nextTime - fromTime,
+        gravitationalParameter,
+      );
+      const nextDistance = getDestinationDistance(nextState, centerName, nextTime);
+      const crossed =
+        entering
+          ? previousDistance > soi && nextDistance <= soi
+          : previousDistance <= soi && nextDistance > soi;
+
+      if (crossed) {
+        let lowTime = previousTime;
+        let highTime = nextTime;
+        for (let iteration = 0; iteration < 50 && highTime - lowTime > 0.01; iteration += 1) {
+          const middleTime = (lowTime + highTime) / 2;
+          const middleState = propagateTwoBody(
+            fromState.position,
+            fromState.velocity,
+            middleTime - fromTime,
+            gravitationalParameter,
+          );
+          const middleDistance = getDestinationDistance(middleState, centerName, middleTime);
+          const middleInside = middleDistance <= soi;
+          if ((entering && middleInside) || (!entering && !middleInside)) {
+            highTime = middleTime;
+          } else {
+            lowTime = middleTime;
+          }
+        }
+        return {
+          time: highTime,
+          entering,
+        };
+      }
+
+      previousTime = nextTime;
+      previousDistance = nextDistance;
+      if (nextTime >= toTime) {
+        break;
+      }
+    }
+
+    return null;
+  };
+
+  const appendSegment = (segmentEndTime) => {
+    let cursorTime = segmentStartTime;
+    let cursorState = state;
+
+    while (cursorTime < segmentEndTime) {
+      const boundary = findSoiBoundary(cursorTime, cursorState, segmentEndTime);
+      const intervalEndTime = boundary?.time ?? segmentEndTime;
+      const intervalDuration = intervalEndTime - cursorTime;
+
+      if (intervalDuration > 0) {
+        for (let index = 1; index <= samplesPerSegment; index += 1) {
+          const progress = index / samplesPerSegment;
+          const offsetTime = intervalDuration * progress;
+          const sampleTime = cursorTime + offsetTime;
+          const propagated = propagateTwoBody(
+            cursorState.position,
+            cursorState.velocity,
+            offsetTime,
+            gravitationalParameter,
+          );
+          points.push(
+            scaleVector(
+              addVectors(getBodyPosition(centerName, sampleTime), propagated.position),
+              DISTANCE_SCALE,
+            ),
+          );
+          times.push(sampleTime);
+          recordApproach(propagated, centerName, sampleTime);
+        }
+        cursorState = propagateTwoBody(
+          cursorState.position,
+          cursorState.velocity,
+          intervalDuration,
+          gravitationalParameter,
+        );
+        cursorTime = intervalEndTime;
+      }
+
+      if (!boundary) {
+        break;
+      }
+
+      if (boundary.entering) {
+        const destinationState = getRelativeBodyState(
+          destinationName,
+          context.centerName,
+          cursorTime,
+          trajectoryCaches,
+        );
+        cursorState = {
+          position: subtractVectors(cursorState.position, destinationState.position),
+          velocity: subtractVectors(cursorState.velocity, destinationState.velocity),
+        };
+        centerName = destinationName;
+        gravitationalParameter = BODY_MU_BY_NAME.get(destinationName) ?? gravitationalParameter;
+        if (encounterTime === null) {
+          encounterTime = cursorTime;
+        }
+      } else {
+        const destinationState = getRelativeBodyState(
+          destinationName,
+          context.centerName,
+          cursorTime,
+          trajectoryCaches,
+        );
+        cursorState = {
+          position: addVectors(cursorState.position, destinationState.position),
+          velocity: addVectors(cursorState.velocity, destinationState.velocity),
+        };
+        centerName = context.centerName;
+        gravitationalParameter = trajectoryMu;
+      }
+      recordApproach(cursorState, centerName, cursorTime);
+    }
+
+    state = cursorState;
     segmentStartTime = segmentEndTime;
   };
 
@@ -1348,8 +1501,9 @@ export function getTransferTrajectory(
     appendSegment(arrivalTime);
   }
 
-  const finalDistance = magnitude(subtractVectors(state.position, arrivalState.position));
-  const encountered = Number.isFinite(destinationBody.soi) ? finalDistance <= destinationBody.soi : false;
+  const finalDistance = getDestinationDistance(state, centerName, arrivalTime);
+  recordApproach(state, centerName, arrivalTime);
+  const encountered = encounterTime !== null;
 
   return {
     valid: true,
@@ -1359,7 +1513,11 @@ export function getTransferTrajectory(
     destinationName,
     arrivalTime,
     encountered,
-    closestApproachDistance: finalDistance,
+    encounterTime,
+    closestApproachTime,
+    closestApproachDistance: closestApproachDistance === Infinity
+      ? finalDistance
+      : closestApproachDistance,
     departureVelocity: solarStartVelocity,
   };
 }
