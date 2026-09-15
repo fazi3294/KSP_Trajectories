@@ -789,10 +789,30 @@ function propagateTwoBody(position, velocity, timeSeconds, gravitationalParamete
   const velocitySquared = dot(velocity, velocity);
   const radialVelocity = dot(position, velocity) / radius;
   const alpha = 2 / radius - velocitySquared / gravitationalParameter;
-  let universalAnomaly =
-    Math.sqrt(gravitationalParameter) * Math.abs(alpha) * timeSeconds;
+  let universalAnomaly;
+  if (Math.abs(alpha) < 1e-10) {
+    universalAnomaly = Math.sqrt(gravitationalParameter) * timeSeconds / radius;
+  } else if (alpha > 0) {
+    universalAnomaly = Math.sqrt(gravitationalParameter) * alpha * timeSeconds;
+  } else {
+    const signedTime = Math.sign(timeSeconds) || 1;
+    const numerator = -2 * gravitationalParameter * alpha * timeSeconds;
+    const denominator =
+      dot(position, velocity) +
+      signedTime *
+        Math.sqrt(-gravitationalParameter / alpha) *
+        (1 - radius * alpha);
+    const logarithmArgument = numerator / denominator;
+    if (Number.isFinite(logarithmArgument) && logarithmArgument > 0) {
+      universalAnomaly =
+        (signedTime * Math.log(logarithmArgument)) / Math.sqrt(-alpha);
+    } else {
+      universalAnomaly =
+        Math.sqrt(gravitationalParameter) * Math.abs(alpha) * timeSeconds;
+    }
+  }
 
-  if (!Number.isFinite(universalAnomaly) || universalAnomaly < 1e-8) {
+  if (!Number.isFinite(universalAnomaly) || Math.abs(universalAnomaly) < 1e-8) {
     universalAnomaly = Math.sqrt(gravitationalParameter) * timeSeconds / radius;
   }
 
@@ -809,7 +829,13 @@ function propagateTwoBody(position, velocity, timeSeconds, gravitationalParamete
       (radius * radialVelocity / Math.sqrt(gravitationalParameter)) * universalAnomaly * (1 - zValue * sValue) +
       (1 - alpha * radius) * universalAnomaly ** 2 * cValue +
       radius;
+    if (!Number.isFinite(derivative) || Math.abs(derivative) < 1e-12) {
+      break;
+    }
     const correction = equation / derivative;
+    if (!Number.isFinite(correction)) {
+      break;
+    }
     universalAnomaly -= correction;
 
     if (Math.abs(correction) < 1e-7) {
@@ -853,6 +879,23 @@ function addManeuverVelocity(state, maneuver) {
   };
 }
 
+function resolveEscapeParkingBasis(originState, escapeAngle) {
+  const originRadial = normalize(originState.position);
+  const fallbackNormal = normalize(cross(originState.position, originState.velocity));
+  const originPrograde = normalize(cross(fallbackNormal, originRadial));
+  const parkingRadial = normalize(
+    addVectors(
+      scaleVector(originPrograde, Math.cos(escapeAngle)),
+      scaleVector(originRadial, -Math.sin(escapeAngle)),
+    ),
+  );
+
+  return {
+    parkingRadial,
+    parkingPrograde: normalize(cross(fallbackNormal, parkingRadial)),
+  };
+}
+
 function createEscapeStartState(originName, departureTime, options = {}) {
   const originBody = getBody(originName);
   const centerName = originBody?.parent;
@@ -870,9 +913,6 @@ function createEscapeStartState(originName, departureTime, options = {}) {
     departureTime,
     { positionCache: new Map(), velocityCache: new Map() },
   );
-  const originRadial = normalize(originState.position);
-  const originNormal = normalize(cross(originState.position, originState.velocity));
-  const originPrograde = normalize(cross(originNormal, originRadial));
   const departureOrbitHeight = Math.max(0, Number(options.departureOrbitHeight) || 0);
   const departureRadius = originBody.radius + departureOrbitHeight;
   const bodyMu = BODY_MU_BY_NAME.get(originName);
@@ -888,15 +928,7 @@ function createEscapeStartState(originName, departureTime, options = {}) {
   // prograde direction toward its anti-radial (sunward) side; this matches
   // the convention used by real transfer-planner tools (e.g. -90 deg is a
   // burn location trailing the body, on the sunward side of its orbit).
-  const parkingRadial = normalize(
-    addVectors(
-      scaleVector(originPrograde, Math.cos(escapeAngle)),
-      scaleVector(originRadial, -Math.sin(escapeAngle)),
-    ),
-  );
-  // The local orbital velocity direction is the burn position rotated 90 degrees
-  // in the direction of motion around originNormal (the body's own prograde sense).
-  const parkingPrograde = normalize(cross(originNormal, parkingRadial));
+  const { parkingRadial, parkingPrograde } = resolveEscapeParkingBasis(originState, escapeAngle);
   const circularSpeed = Math.sqrt(bodyMu / departureRadius);
   const localStartState = {
     position: scaleVector(parkingRadial, departureRadius),
@@ -936,6 +968,12 @@ function createEscapeStartState(originName, departureTime, options = {}) {
       reason: "Podane Δv nie opuszcza SOI ciała startowego w ciągu trzech dni.",
     };
   }
+  const originExitState = getRelativeBodyState(
+    originName,
+    centerName,
+    departureTime + localDuration,
+    { positionCache: new Map(), velocityCache: new Map() },
+  );
 
   return {
     valid: true,
@@ -948,8 +986,8 @@ function createEscapeStartState(originName, departureTime, options = {}) {
     localExitState,
     solarStartTime: departureTime + localDuration,
     solarStartState: {
-      position: addVectors(originState.position, localExitState.position),
-      velocity: addVectors(originState.velocity, localExitState.velocity),
+      position: addVectors(originExitState.position, localExitState.position),
+      velocity: addVectors(originExitState.velocity, localExitState.velocity),
     },
   };
 }
@@ -1182,9 +1220,6 @@ export function getTransferTrajectory(
     departureTime,
     { positionCache: new Map(), velocityCache: new Map() },
   );
-  const originRadial = normalize(originState.position);
-  const originNormal = normalize(cross(originState.position, originState.velocity));
-  const originPrograde = normalize(cross(originNormal, originRadial));
   const departureOrbitHeight = Math.max(0, Number(options.departureOrbitHeight) || 0);
   const departureRadius = originBody.radius + departureOrbitHeight;
   const bodyMu = BODY_MU_BY_NAME.get(originName);
@@ -1194,15 +1229,7 @@ export function getTransferTrajectory(
   // prograde direction toward its anti-radial (sunward) side; this matches
   // the convention used by real transfer-planner tools (e.g. -90 deg is a
   // burn location trailing the body, on the sunward side of its orbit).
-  const parkingRadial = normalize(
-    addVectors(
-      scaleVector(originPrograde, Math.cos(escapeAngle)),
-      scaleVector(originRadial, -Math.sin(escapeAngle)),
-    ),
-  );
-  // The local orbital velocity direction is the burn position rotated 90 degrees
-  // in the direction of motion around originNormal (the body's own prograde sense).
-  const parkingPrograde = normalize(cross(originNormal, parkingRadial));
+  const { parkingRadial, parkingPrograde } = resolveEscapeParkingBasis(originState, escapeAngle);
   const arrivalState = getRelativeBodyState(
     destinationName,
     context.centerName,
@@ -1222,6 +1249,7 @@ export function getTransferTrajectory(
   };
   let localDuration = 0;
   let localExitState = localStartState;
+  let escaped = false;
 
   if (localMu && originBody.soi) {
     const localStep = 60;
@@ -1236,9 +1264,19 @@ export function getTransferTrajectory(
       if (magnitude(candidate.position) >= originBody.soi) {
         localDuration = elapsed;
         localExitState = candidate;
+        escaped = true;
         break;
       }
     }
+  } else {
+    escaped = true;
+  }
+
+  if (!escaped) {
+    return {
+      valid: false,
+      reason: "Podane Δv nie opuszcza SOI ciała startowego w ciągu trzech dni.",
+    };
   }
 
   for (let index = 0; index <= samplesPerSegment; index += 1) {
@@ -1257,8 +1295,14 @@ export function getTransferTrajectory(
     times.push(departureTime + offsetTime);
   }
 
-  const solarStartPosition = addVectors(originState.position, localExitState.position);
-  const solarStartVelocity = addVectors(originState.velocity, localExitState.velocity);
+  const originExitState = getRelativeBodyState(
+    originName,
+    context.centerName,
+    departureTime + localDuration,
+    { positionCache: new Map(), velocityCache: new Map() },
+  );
+  const solarStartPosition = addVectors(originExitState.position, localExitState.position);
+  const solarStartVelocity = addVectors(originExitState.velocity, localExitState.velocity);
   let state = {
     position: solarStartPosition,
     velocity: solarStartVelocity,
