@@ -835,57 +835,6 @@ function propagateTwoBody(position, velocity, timeSeconds, gravitationalParamete
   return { position: nextPosition, velocity: nextVelocity };
 }
 
-function propagateNumerically(position, velocity, timeSeconds, gravitationalParameter) {
-  if (timeSeconds <= 0) {
-    return { position, velocity };
-  }
-
-  const stepCount = Math.max(1, Math.ceil(timeSeconds / 3600));
-  const step = timeSeconds / stepCount;
-  let currentPosition = position;
-  let currentVelocity = velocity;
-
-  const acceleration = (currentPosition) => {
-    const radius = magnitude(currentPosition);
-    const factor = -gravitationalParameter / radius ** 3;
-    return scaleVector(currentPosition, factor);
-  };
-
-  for (let index = 0; index < stepCount; index += 1) {
-    const positionK1 = currentVelocity;
-    const velocityK1 = acceleration(currentPosition);
-    const positionK2 = addVectors(currentVelocity, scaleVector(velocityK1, step / 2));
-    const velocityK2 = acceleration(addVectors(currentPosition, scaleVector(positionK1, step / 2)));
-    const positionK3 = addVectors(currentVelocity, scaleVector(velocityK2, step / 2));
-    const velocityK3 = acceleration(addVectors(currentPosition, scaleVector(positionK2, step / 2)));
-    const positionK4 = addVectors(currentVelocity, scaleVector(velocityK3, step));
-    const velocityK4 = acceleration(addVectors(currentPosition, scaleVector(positionK3, step)));
-
-    currentPosition = addVectors(
-      currentPosition,
-      scaleVector(
-        addVectors(
-          addVectors(positionK1, scaleVector(positionK2, 2)),
-          addVectors(scaleVector(positionK3, 2), positionK4),
-        ),
-        step / 6,
-      ),
-    );
-    currentVelocity = addVectors(
-      currentVelocity,
-      scaleVector(
-        addVectors(
-          addVectors(velocityK1, scaleVector(velocityK2, 2)),
-          addVectors(scaleVector(velocityK3, 2), velocityK4),
-        ),
-        step / 6,
-      ),
-    );
-  }
-
-  return { position: currentPosition, velocity: currentVelocity };
-}
-
 function addManeuverVelocity(state, maneuver) {
   const prograde = normalize(state.velocity);
   const radial = normalize(state.position);
@@ -935,18 +884,19 @@ function createEscapeStartState(originName, departureTime, options = {}) {
   }
 
   const escapeAngle = degreesToRadians(Number(options.departureEscapeAngle) || 0);
+  // Positive ejection angles rotate the burn position from the body's own
+  // prograde direction toward its anti-radial (sunward) side; this matches
+  // the convention used by real transfer-planner tools (e.g. -90 deg is a
+  // burn location trailing the body, on the sunward side of its orbit).
   const parkingRadial = normalize(
     addVectors(
       scaleVector(originPrograde, Math.cos(escapeAngle)),
-      scaleVector(originRadial, Math.sin(escapeAngle)),
+      scaleVector(originRadial, -Math.sin(escapeAngle)),
     ),
   );
-  const parkingPrograde = normalize(
-    addVectors(
-      scaleVector(originRadial, Math.cos(escapeAngle)),
-      scaleVector(originPrograde, -Math.sin(escapeAngle)),
-    ),
-  );
+  // The local orbital velocity direction is the burn position rotated 90 degrees
+  // in the direction of motion around originNormal (the body's own prograde sense).
+  const parkingPrograde = normalize(cross(originNormal, parkingRadial));
   const circularSpeed = Math.sqrt(bodyMu / departureRadius);
   const localStartState = {
     position: scaleVector(parkingRadial, departureRadius),
@@ -963,7 +913,7 @@ function createEscapeStartState(originName, departureTime, options = {}) {
     const localStep = 60;
     const maxLocalDuration = 60 * 60 * 24 * 3;
     for (let elapsed = localStep; elapsed <= maxLocalDuration; elapsed += localStep) {
-      const candidate = propagateNumerically(
+      const candidate = propagateTwoBody(
         localStartState.position,
         localStartState.velocity,
         elapsed,
@@ -1005,20 +955,8 @@ function createEscapeStartState(originName, departureTime, options = {}) {
 }
 
 function createTwoBodyPropagator(state, gravitationalParameter) {
-  const keplerOrbit = createKeplerOrbit(
-    state.position,
-    state.velocity,
-    gravitationalParameter,
-  );
   return (offsetTime) =>
-    keplerOrbit
-      ? propagateKeplerOrbit(keplerOrbit, offsetTime, gravitationalParameter)
-      : propagateNumerically(
-          state.position,
-          state.velocity,
-          offsetTime,
-          gravitationalParameter,
-        );
+    propagateTwoBody(state.position, state.velocity, offsetTime, gravitationalParameter);
 }
 
 export function getEscapeTrajectory(originName, departureTime, options = {}) {
@@ -1126,7 +1064,7 @@ export function getEscapeTrajectory(originName, departureTime, options = {}) {
   for (let index = 0; index <= samplesPerLocalSegment; index += 1) {
     const progress = index / samplesPerLocalSegment;
     const offsetTime = start.localDuration * progress;
-    const localState = propagateNumerically(
+    const localState = propagateTwoBody(
       start.localStartState.position,
       start.localStartState.velocity,
       offsetTime,
@@ -1183,149 +1121,6 @@ export function getEscapeTrajectory(originName, departureTime, options = {}) {
     encountered: selectedApproach.normalizedDistance <= 1,
     departureVelocity: start.solarStartState.velocity,
   };
-}
-
-function createKeplerOrbit(position, velocity, gravitationalParameter) {
-  const radius = magnitude(position);
-  const speedSquared = dot(velocity, velocity);
-  const angularMomentum = cross(position, velocity);
-  const angularMomentumMagnitude = magnitude(angularMomentum);
-  if (
-    radius <= 0 ||
-    angularMomentumMagnitude <= 0 ||
-    !Number.isFinite(gravitationalParameter) ||
-    gravitationalParameter <= 0
-  ) {
-    return null;
-  }
-
-  const eccentricityVector = subtractVectors(
-    scaleVector(cross(velocity, angularMomentum), 1 / gravitationalParameter),
-    scaleVector(position, 1 / radius),
-  );
-  const eccentricity = magnitude(eccentricityVector);
-  const specificEnergy = speedSquared / 2 - gravitationalParameter / radius;
-  if (Math.abs(eccentricity - 1) < 1e-8) {
-    return null;
-  }
-
-  const orbitalNormal = scaleVector(angularMomentum, 1 / angularMomentumMagnitude);
-  const periapsisDirection =
-    eccentricity > 1e-8 ? normalize(eccentricityVector) : normalize(position);
-  const transverseDirection = normalize(cross(orbitalNormal, periapsisDirection));
-  const trueAnomaly = Math.atan2(
-    dot(position, transverseDirection),
-    dot(position, periapsisDirection),
-  );
-
-  if (specificEnergy > 0 && eccentricity > 1) {
-    const semiMajorAxis = gravitationalParameter / (2 * specificEnergy);
-    const hyperbolicAnomaly = 2 * Math.atanh(
-      Math.sqrt((eccentricity - 1) / (eccentricity + 1)) * Math.tan(trueAnomaly / 2),
-    );
-    return {
-      type: "hyperbolic",
-      semiMajorAxis,
-      eccentricity,
-      periapsisDirection,
-      transverseDirection,
-      meanMotion: Math.sqrt(gravitationalParameter / semiMajorAxis ** 3),
-      meanAnomalyAtEpoch: eccentricity * Math.sinh(hyperbolicAnomaly) - hyperbolicAnomaly,
-    };
-  }
-
-  const semiMajorAxis = -gravitationalParameter / (2 * specificEnergy);
-  const eccentricAnomaly = 2 * Math.atan2(
-    Math.sqrt(1 - eccentricity) * Math.sin(trueAnomaly / 2),
-    Math.sqrt(1 + eccentricity) * Math.cos(trueAnomaly / 2),
-  );
-
-  return {
-    semiMajorAxis,
-    eccentricity,
-    periapsisDirection,
-    transverseDirection,
-    meanMotion: Math.sqrt(gravitationalParameter / semiMajorAxis ** 3),
-    meanAnomalyAtEpoch: eccentricAnomaly - eccentricity * Math.sin(eccentricAnomaly),
-  };
-}
-
-function propagateKeplerOrbit(orbit, timeSeconds, gravitationalParameter) {
-  const meanAnomaly = orbit.meanAnomalyAtEpoch + orbit.meanMotion * timeSeconds;
-  if (orbit.type === "hyperbolic") {
-    let hyperbolicAnomaly = Math.asinh(meanAnomaly / orbit.eccentricity);
-    for (let iteration = 0; iteration < 16; iteration += 1) {
-      const correction =
-        (orbit.eccentricity * Math.sinh(hyperbolicAnomaly) - hyperbolicAnomaly - meanAnomaly) /
-        (orbit.eccentricity * Math.cosh(hyperbolicAnomaly) - 1);
-      hyperbolicAnomaly -= correction;
-      if (Math.abs(correction) < 1e-11) {
-        break;
-      }
-    }
-
-    const radius =
-      orbit.semiMajorAxis * (orbit.eccentricity * Math.cosh(hyperbolicAnomaly) - 1);
-    const position = addVectors(
-      scaleVector(
-        orbit.periapsisDirection,
-        orbit.semiMajorAxis * (orbit.eccentricity - Math.cosh(hyperbolicAnomaly)),
-      ),
-      scaleVector(
-        orbit.transverseDirection,
-        orbit.semiMajorAxis *
-          Math.sqrt(orbit.eccentricity ** 2 - 1) *
-          Math.sinh(hyperbolicAnomaly),
-      ),
-    );
-    const velocityScale = Math.sqrt(gravitationalParameter / orbit.semiMajorAxis) / radius;
-    const velocity = addVectors(
-      scaleVector(orbit.periapsisDirection, velocityScale * Math.sinh(hyperbolicAnomaly)),
-      scaleVector(
-        orbit.transverseDirection,
-        velocityScale *
-          Math.sqrt(orbit.eccentricity ** 2 - 1) *
-          Math.cosh(hyperbolicAnomaly),
-      ),
-    );
-    return { position, velocity };
-  }
-
-  let eccentricAnomaly = meanAnomaly;
-  for (let iteration = 0; iteration < 16; iteration += 1) {
-    const correction =
-      (eccentricAnomaly - orbit.eccentricity * Math.sin(eccentricAnomaly) - meanAnomaly) /
-      (1 - orbit.eccentricity * Math.cos(eccentricAnomaly));
-    eccentricAnomaly -= correction;
-    if (Math.abs(correction) < 1e-11) {
-      break;
-    }
-  }
-
-  const radius =
-    orbit.semiMajorAxis * (1 - orbit.eccentricity * Math.cos(eccentricAnomaly));
-  const position = addVectors(
-    scaleVector(
-      orbit.periapsisDirection,
-      orbit.semiMajorAxis * (Math.cos(eccentricAnomaly) - orbit.eccentricity),
-    ),
-    scaleVector(
-      orbit.transverseDirection,
-      orbit.semiMajorAxis *
-        Math.sqrt(1 - orbit.eccentricity ** 2) *
-        Math.sin(eccentricAnomaly),
-    ),
-  );
-  const velocityScale = Math.sqrt(gravitationalParameter * orbit.semiMajorAxis) / radius;
-  const velocity = addVectors(
-    scaleVector(orbit.periapsisDirection, -velocityScale * Math.sin(eccentricAnomaly)),
-    scaleVector(
-      orbit.transverseDirection,
-      velocityScale * Math.sqrt(1 - orbit.eccentricity ** 2) * Math.cos(eccentricAnomaly),
-    ),
-  );
-
-  return { position, velocity };
 }
 
 export function getTransferPlan(originName, destinationName, departureTime, arrivalTime) {
@@ -1395,21 +1190,19 @@ export function getTransferTrajectory(
   const bodyMu = BODY_MU_BY_NAME.get(originName);
   const circularSpeed = bodyMu ? Math.sqrt(bodyMu / departureRadius) : 0;
   const escapeAngle = degreesToRadians(Number(options.departureEscapeAngle) || 0);
-  // The ejection angle identifies the burn position around the origin body:
-  // 0° is in the body's prograde direction, positive angles turn toward its
-  // outward radial direction, and negative angles turn behind the body.
+  // Positive ejection angles rotate the burn position from the body's own
+  // prograde direction toward its anti-radial (sunward) side; this matches
+  // the convention used by real transfer-planner tools (e.g. -90 deg is a
+  // burn location trailing the body, on the sunward side of its orbit).
   const parkingRadial = normalize(
     addVectors(
       scaleVector(originPrograde, Math.cos(escapeAngle)),
-      scaleVector(originRadial, Math.sin(escapeAngle)),
+      scaleVector(originRadial, -Math.sin(escapeAngle)),
     ),
   );
-  const parkingPrograde = normalize(
-    addVectors(
-      scaleVector(originRadial, Math.cos(escapeAngle)),
-      scaleVector(originPrograde, -Math.sin(escapeAngle)),
-    ),
-  );
+  // The local orbital velocity direction is the burn position rotated 90 degrees
+  // in the direction of motion around originNormal (the body's own prograde sense).
+  const parkingPrograde = normalize(cross(originNormal, parkingRadial));
   const arrivalState = getRelativeBodyState(
     destinationName,
     context.centerName,
@@ -1434,7 +1227,7 @@ export function getTransferTrajectory(
     const localStep = 60;
     const maxLocalDuration = Math.min(arrivalTime - departureTime, 60 * 60 * 24 * 3);
     for (let elapsed = localStep; elapsed <= maxLocalDuration; elapsed += localStep) {
-      const candidate = propagateNumerically(
+      const candidate = propagateTwoBody(
         localStartState.position,
         localStartState.velocity,
         elapsed,
@@ -1451,7 +1244,7 @@ export function getTransferTrajectory(
   for (let index = 0; index <= samplesPerSegment; index += 1) {
     const progress = index / samplesPerSegment;
     const offsetTime = localDuration * progress;
-    const localState = propagateNumerically(
+    const localState = propagateTwoBody(
       localStartState.position,
       localStartState.velocity,
       offsetTime,
@@ -1475,20 +1268,13 @@ export function getTransferTrajectory(
   const appendSegment = (segmentEndTime) => {
     const duration = segmentEndTime - segmentStartTime;
     const segmentStartState = state;
-    const keplerOrbit = createKeplerOrbit(
-      segmentStartState.position,
-      segmentStartState.velocity,
-      trajectoryMu,
-    );
     const propagateSegment = (offsetTime) =>
-      keplerOrbit
-        ? propagateKeplerOrbit(keplerOrbit, offsetTime, trajectoryMu)
-        : propagateNumerically(
-            segmentStartState.position,
-            segmentStartState.velocity,
-            offsetTime,
-            trajectoryMu,
-          );
+      propagateTwoBody(
+        segmentStartState.position,
+        segmentStartState.velocity,
+        offsetTime,
+        trajectoryMu,
+      );
     for (let index = points.length === 0 ? 0 : 1; index <= samplesPerSegment; index += 1) {
       const progress = index / samplesPerSegment;
       const offsetTime = duration * progress;
